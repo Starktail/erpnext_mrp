@@ -8,6 +8,11 @@
     :pagination="true"
     :paginationPageSize="10"
     :getRowId="getRowId"
+    :defaultColDef="{
+      wrapHeaderText: true,
+      autoHeaderHeight: true,
+      resizable: true
+    }"
   />
   <Dialog v-model="showDialog" title="Material Request Details" @hide="showDialog = false">
     <div>

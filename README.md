@@ -4,6 +4,9 @@ MRP Tools for ERPNext
 
 > #### 🚧🚧 This app is still in requirements generation and POC phase 🚧🚧
 
+
+![demo screenshot](docs/demo.png)
+
 ### Installation
 
 You can install this app using the [bench](https://github.com/frappe/bench) CLI:
