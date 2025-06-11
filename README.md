@@ -22,7 +22,7 @@ cd apps/erpnext_mrp
 npx degit netchampfaris/frappe-ui-starter frontend
 cd frontend
 yarn
-yarn dev
+yarn dev --host
 ```
 
 In a development environment, you need to put the below key-value pair in your site_config.json file:
