@@ -1,6 +1,6 @@
 <template>
-  <div class="max-w-3xl py-12 mx-auto">
-    <Button
+  <div class="w-full px-4 py-12">
+    <!-- <Button
       icon-left="code"
       @click="$resources.ping.fetch"
       :loading="$resources.ping.loading"
@@ -14,7 +14,8 @@
 
     <Button @click="showDialog = true">Open Dialog</Button>
     <Dialog title="Title" v-model="showDialog"> Dialog content </Dialog>
-    <Button variant="primary" @click="goToFrappe">Open Frappe App</Button>
+    <Button variant="primary" @click="goToFrappe">Open Frappe App</Button> -->
+    <h1 class="text-2xl font-bold mb-4">MRP Workbench</h1>
     <MaterialRequestList class="mt-8" />
   </div>
 </template>

@@ -33,7 +33,7 @@ export default {
     Dialog, // Register the Dialog component
     buttonCellRenderer: { 
       name: 'ButtonCellRenderer',
-      template: `<Button @click="onButtonClick">Open Dialog</Button>`,
+      template: `<Button @click="onButtonClick">Planning Detail</Button>`,
       components: { // Explicitly register Button for this local component
         Button,
       },
@@ -55,9 +55,24 @@ export default {
     return {
       showDialog: false, // New data property
       columnDefs: [
-        { field: 'name', headerName: 'Name', sortable: true, filter: true, flex: 1 },
-        { field: 'transaction_date', headerName: 'Transaction Date', sortable: true, filter: true, flex: 1 },
-        { field: 'status', headerName: 'Status', sortable: true, filter: true, flex: 1 },
+        { field: 'item_code', headerName: 'Item Code', sortable: true, filter: true, flex: 1 },
+        { field: 'item_name', headerName: 'Item Name', sortable: true, filter: true, flex: 1 },
+        { field: 'item_group', headerName: 'Item Group', sortable: true, filter: true, flex: 1 },
+        { field: 'bom_levels', headerName: 'Bom Levels', sortable: true, filter: true, flex: 1 },
+        { field: 'uom', headerName: 'Uom', sortable: true, filter: true, flex: 1 },
+        { field: 'gross_requirement', headerName: 'Gross Requirement', sortable: true, filter: true, flex: 1 },
+        { field: 'customer_orders', headerName: 'Customer Orders', sortable: true, filter: true, flex: 1 },
+        { field: 'forecasted_demand', headerName: 'Forecasted Demand', sortable: true, filter: true, flex: 1 },
+        { field: 'document_reference', headerName: 'Document Reference', sortable: true, filter: true, flex: 1 },
+        { field: 'on_hand_inventory', headerName: 'On Hand Inventory', sortable: true, filter: true, flex: 1 },
+        { field: 'scheduled_receipts', headerName: 'Scheduled Receipts', sortable: true, filter: true, flex: 1 },
+        { field: 'planned_orders', headerName: 'Planned Orders', sortable: true, filter: true, flex: 1 },
+        { field: 'suppliersource', headerName: 'Suppliersource', sortable: true, filter: true, flex: 1 },
+        { field: 'net_requirements', headerName: 'Net Requirements', sortable: true, filter: true, flex: 1 },
+        { field: 'safety_stock', headerName: 'Safety Stock', sortable: true, filter: true, flex: 1 },
+        { field: 'reorder_level', headerName: 'Reorder Level', sortable: true, filter: true, flex: 1 },
+        { field: 'order_quantity', headerName: 'Order Quantity', sortable: true, filter: true, flex: 1 },
+        { field: 'lead_time', headerName: 'Lead Time', sortable: true, filter: true, flex: 1 },
         { // New column for actions
           headerName: 'Actions',
           cellRenderer: 'buttonCellRenderer', // Use the locally registered component
@@ -75,11 +90,29 @@ export default {
     material_requests() {
       return {
         type: 'list',
-        doctype: 'Material Request',
-        fields: ['name', 'title', 'status', 'transaction_date'],
+        doctype: 'MRP Demo Record',
+        fields: [  "item_code",
+          "item_name",
+          "item_group",
+          "bom_levels",
+          "uom",
+          "gross_requirement",
+          "customer_orders",
+          "forecasted_demand",
+          "document_reference",
+          "on_hand_inventory",
+          "scheduled_receipts",
+          "planned_orders",
+          "suppliersource",
+          "net_requirements",
+          "safety_stock",
+          "reorder_level",
+          "order_quantity",
+          "lead_time"
+        ],
         orderBy: 'creation desc',
         start: 0,
-        pageLength: 5,
+        pageLength: 15,
         auto: true,
       }
     },

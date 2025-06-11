@@ -1,0 +1,147 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "creation": "2025-06-11 17:40:34.677138",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "item_group",
+  "bom_levels",
+  "uom",
+  "gross_requirement",
+  "customer_orders",
+  "forecasted_demand",
+  "document_reference",
+  "on_hand_inventory",
+  "scheduled_receipts",
+  "planned_orders",
+  "suppliersource",
+  "net_requirements",
+  "safety_stock",
+  "reorder_level",
+  "order_quantity",
+  "lead_time"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Data",
+   "label": "Item Code"
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name"
+  },
+  {
+   "fieldname": "item_group",
+   "fieldtype": "Data",
+   "label": "Item Group"
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UoM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "gross_requirement",
+   "fieldtype": "Data",
+   "label": "Gross Requirement"
+  },
+  {
+   "fieldname": "customer_orders",
+   "fieldtype": "Data",
+   "label": "Customer Orders"
+  },
+  {
+   "fieldname": "forecasted_demand",
+   "fieldtype": "Data",
+   "label": "Forecasted Demand"
+  },
+  {
+   "fieldname": "document_reference",
+   "fieldtype": "Data",
+   "label": "Document Reference"
+  },
+  {
+   "fieldname": "bom_levels",
+   "fieldtype": "Data",
+   "label": "BOM Level"
+  },
+  {
+   "fieldname": "on_hand_inventory",
+   "fieldtype": "Data",
+   "label": "On Hand Inventory"
+  },
+  {
+   "fieldname": "scheduled_receipts",
+   "fieldtype": "Data",
+   "label": "Scheduled Receipts"
+  },
+  {
+   "fieldname": "planned_orders",
+   "fieldtype": "Data",
+   "label": "Planned Orders"
+  },
+  {
+   "fieldname": "suppliersource",
+   "fieldtype": "Data",
+   "label": "Supplier/Source"
+  },
+  {
+   "fieldname": "net_requirements",
+   "fieldtype": "Data",
+   "label": "Net Requirements"
+  },
+  {
+   "fieldname": "safety_stock",
+   "fieldtype": "Data",
+   "label": "Safety Stock"
+  },
+  {
+   "fieldname": "reorder_level",
+   "fieldtype": "Data",
+   "label": "Reorder Level"
+  },
+  {
+   "fieldname": "order_quantity",
+   "fieldtype": "Data",
+   "label": "Order Quantity"
+  },
+  {
+   "fieldname": "lead_time",
+   "fieldtype": "Data",
+   "label": "Lead Time"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-06-11 17:47:50.450140",
+ "modified_by": "Administrator",
+ "module": "mrp_demo",
+ "name": "MRP Demo Record",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
