@@ -2,6 +2,7 @@
   <ag-grid-vue
     style="height: 500px;"
     class="ag-theme-alpine mt-8 w-full"
+    theme="legacy"
     :columnDefs="columnDefs"
     :rowData="materialRequestRows"
     :pagination="true"
