@@ -6,6 +6,11 @@ const routes = [
     name: 'Home',
     component: () => import('@/pages/Home.vue'),
   },
+  {
+    path: '/forecast',
+    name: 'Forecast',
+    component: () => import('@/pages/Forecast.vue'),
+  },
 ]
 
 let router = createRouter({

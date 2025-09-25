@@ -5,5 +5,5 @@
 from frappe.model.document import Document
 
 
-class MRPDemoRecord(Document):
+class MRPForecast(Document):
 	pass

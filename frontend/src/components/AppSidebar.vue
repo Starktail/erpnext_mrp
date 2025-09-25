@@ -71,7 +71,12 @@ const mrpSections = computed(() => [
     hideLabel: false,
     links: [
       {
-        label: 'Material Requests',
+        label: 'Forecast',
+        icon: 'bar-chart-2', // FeatherIcon name
+        to: '/forecast',
+      },
+      {
+        label: 'MRP Workbench',
         icon: 'list', // FeatherIcon name
         to: '/', // Assuming Home.vue (with MaterialRequestList) is at the root path
       },

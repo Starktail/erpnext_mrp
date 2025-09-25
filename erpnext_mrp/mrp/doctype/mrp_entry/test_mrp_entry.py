@@ -5,5 +5,5 @@
 from frappe.tests.utils import FrappeTestCase
 
 
-class TestMRPDemoRecord(FrappeTestCase):
+class TestMRPEntry(FrappeTestCase):
 	pass
