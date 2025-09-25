@@ -17,11 +17,18 @@
   "lead_time",
   "is_urgent",
   "on_hand_inventory",
+  "open_orders_section",
   "open_orders",
+  "reserved_qty",
+  "reserved_qty_for_production",
+  "forecast_demand_section",
   "forecast_demand",
+  "scheduled_receipts_section",
   "scheduled_receipts",
+  "section_break_sgyw",
   "suggested_receipts",
   "suggested_orders",
+  "section_break_gruc",
   "projected_on_hand_inventory"
  ],
  "fields": [
@@ -58,13 +65,13 @@
   },
   {
    "fieldname": "reorder_level",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "Reorder Level"
   },
   {
    "description": "Reorder Quantity (MOQ)",
    "fieldname": "reorder_quantity",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "Reorder Quantity"
   },
   {
@@ -82,25 +89,25 @@
   {
    "description": "Stock on Hand\n(Begin of period)",
    "fieldname": "on_hand_inventory",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "On Hand Inventory"
   },
   {
-   "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period",
+   "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period\n<br><br>\n<code>Reserved Qty + Reserved Qty for Production</code>",
    "fieldname": "open_orders",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "Open Orders"
   },
   {
    "description": "For final products: Total qty that is Forcasted for this period\n\nFor sub-assemblies: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period\n\nFor purchase items: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period",
    "fieldname": "forecast_demand",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "Forecast Demand"
   },
   {
    "description": "For final products: Total qty that is has existing open Work Orders for this period\n<br>\nFor sub-assemblies: Total qty that is has existing open Work Orders for this period\n<br>\nFor purchase items: Total qty that is has existing open Purchase Orders for this period",
    "fieldname": "scheduled_receipts",
-   "fieldtype": "Data",
+   "fieldtype": "Float",
    "label": "Scheduled Receipts"
   },
   {
@@ -131,12 +138,47 @@
    "fieldtype": "Date",
    "label": "Target Date",
    "reqd": 1
+  },
+  {
+   "fieldname": "open_orders_section",
+   "fieldtype": "Section Break",
+   "label": "Open Orders"
+  },
+  {
+   "description": "Looks at <b>Sales Orders</b>",
+   "fieldname": "reserved_qty",
+   "fieldtype": "Float",
+   "label": "Reserved Qty"
+  },
+  {
+   "description": "Looks at <b>Work Orders</b> where this item will be used/consumed",
+   "fieldname": "reserved_qty_for_production",
+   "fieldtype": "Float",
+   "label": "Reserved Qty for Production"
+  },
+  {
+   "fieldname": "forecast_demand_section",
+   "fieldtype": "Section Break",
+   "label": "Forecast Demand"
+  },
+  {
+   "fieldname": "scheduled_receipts_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduled Receipts"
+  },
+  {
+   "fieldname": "section_break_sgyw",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "section_break_gruc",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 19:52:20.920848",
+ "modified": "2025-09-25 20:20:01.613832",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

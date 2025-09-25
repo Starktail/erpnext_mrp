@@ -10,9 +10,14 @@ def create_mrp_item_entries():
     """
     Calculate BOM levels and create MRP Entry records for each item for each week in a look-ahead period.
 
-    This function is idempotent: it clears all existing MRP Entry records before inserting new ones.
-    It uses a performant SQL query to get item levels and `itertools` to efficiently combine
-    items with time periods, avoiding slow loops.
+    This function is idempotent: it clears all existing MRP Entry records before inserting
+    the newly calculated levels. The BOM level is determined by the deepest nesting level of an item in all **default** BOMs.
+    - Level 0: Top-level items that are not used as components in any other default BOM.
+    - Level n: Components that are n levels deep in a default BOM hierarchy.
+
+    This implementation uses a raw recursive SQL query for better performance.
+
+    We use frappe.db.sql because WITH RECURSIVE is a special construct that frappe.qb/pypika do not expose.
     """
     # 1. Clear all existing records from the MRP Entry table
     frappe.db.delete("MRP Entry")
@@ -116,4 +121,118 @@ def create_mrp_item_entries():
 
 @frappe.whitelist()
 def process_mrp_item_entries():
-    pass
+    """
+    Main background task to process all MRP calculations for each item and period.
+    """
+    update_open_orders()
+    # Future calculation steps will be called here
+
+def update_open_orders():
+    _update_reserved_qty()
+    _update_reserved_qty_for_production()
+
+    def _update_reserved_qty():
+        """
+        Calculates open sales order quantities for each item and week, then bulk updates MRP Entry.
+
+        This query is an adaptation of the standard ERPNext reserved quantity calculation,
+        modified to group results by the calendar week of the Sales Order Item's delivery date.
+
+        Same as Bin > reserved_qty.
+        Based on frappe-bench-v15/apps/erpnext/erpnext/stock/stock_balance.py > get_reserved_qty	
+        """
+        settings = frappe.get_cached_doc("MRP Settings")
+        look_ahead = settings.look_ahead or 6
+        start_date = datetime.date.today()
+        end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+        # Note: DATE_FORMAT(date, '%%YCW%%v') is used to create the week string, e.g., '2025CW39'.
+        # The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
+        sql_query = f"""
+            SELECT
+                item_code,
+                DATE_FORMAT(delivery_date, '%%YCW%%v') AS calendar_week,
+                SUM(reserved_qty) AS total_reserved_qty
+            FROM (
+                SELECT
+                    item_code,
+                    delivery_date,
+                    (
+                        dnpi_qty * (
+                            (so_item_qty - so_item_delivered_qty - IF(dont_reserve_qty_on_return, so_item_returned_qty, 0))
+                            / so_item_qty
+                        )
+                    ) AS reserved_qty
+                FROM (
+                    SELECT
+                        dnpi.item_code,
+                        dnpi.qty AS dnpi_qty,
+                        soi.qty AS so_item_qty,
+                        soi.delivered_qty AS so_item_delivered_qty,
+                        soi.returned_qty AS so_item_returned_qty,
+                        soi.delivery_date,
+                        0 AS dont_reserve_qty_on_return
+                    FROM `tabPacked Item` AS dnpi
+                    JOIN `tabSales Order Item` AS soi ON dnpi.parent_detail_docname = soi.name
+                    JOIN `tabSales Order` AS so ON dnpi.parent = so.name
+                    WHERE so.docstatus = 1
+                        AND so.status NOT IN ('On Hold', 'Closed')
+                        AND (soi.delivered_by_supplier IS NULL OR soi.delivered_by_supplier = 0)
+                        AND dnpi.item_code != dnpi.parent_item
+
+                    UNION ALL
+
+                    SELECT
+                        so_item.item_code,
+                        so_item.stock_qty AS dnpi_qty,
+                        so_item.qty AS so_item_qty,
+                        so_item.delivered_qty AS so_item_delivered_qty,
+                        so_item.returned_qty AS so_item_returned_qty,
+                        so_item.delivery_date,
+                        0 AS dont_reserve_qty_on_return
+                    FROM `tabSales Order Item` AS so_item
+                    JOIN `tabSales Order` AS so ON so_item.parent = so.name
+                    WHERE so.docstatus = 1
+                        AND so.status NOT IN ('On Hold', 'Closed')
+                        AND (so_item.delivered_by_supplier IS NULL OR so_item.delivered_by_supplier = 0)
+                ) AS combined_so_items
+                WHERE so_item_qty >= so_item_delivered_qty
+            ) AS final_so_data
+            WHERE delivery_date BETWEEN %(start_date)s AND %(end_date)s
+            GROUP BY item_code, calendar_week;
+        """
+        open_orders_data = frappe.db.sql(
+            sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+        )
+
+        if not open_orders_data:
+            return
+
+        # Use a CASE statement for efficient bulk updates
+        update_cases = []
+        mrp_entry_names = []
+        for row in open_orders_data:
+            mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+            # Ensure names are properly escaped for the SQL query
+            mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+            update_cases.append(f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN {row.total_reserved_qty}")
+
+        if not mrp_entry_names:
+            return
+
+        case_str = " ".join(update_cases)
+        names_str = ", ".join(mrp_entry_names)
+
+        update_query = f"""
+            UPDATE `tabMRP Entry`
+            SET reserved_qty = CASE
+                {case_str}
+                ELSE reserved_qty
+            END
+            WHERE name IN ({names_str})
+        """
+        frappe.db.sql(update_query)
+    
+    
+    def _update_reserved_qty_for_production():
+        pass
