@@ -1,8 +1,11 @@
 import datetime
 import itertools
+import math
 
 import frappe
 from frappe import _
+
+from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 
 
 @frappe.whitelist()
@@ -73,6 +76,7 @@ def create_mrp_item_entries():
         -- Final Selection
         SELECT
             t_item.name AS item_code,
+            t_item.lead_time_days AS lead_time,
             COALESCE(bl.bom_level, 0) AS bom_level
         FROM
             `tabItem` AS t_item
@@ -107,13 +111,13 @@ def create_mrp_item_entries():
     # item is a tuple: (item_code, bom_level)
     # period is a tuple: (period_str, target_date)
     final_values = [
-        (f"{item[0]}{period[0]}", item[0], item[1], period[1])
+        (f"{item[0]}{period[0]}", item[0], item[1], item[2], period[1])
         for item, period in itertools.product(item_list, period_data)
     ]
     # 5. Perform a bulk insert of all generated records
     frappe.db.bulk_insert(
         "MRP Entry",
-        fields=["name", "item_code", "bom_level", "target_date"],
+        fields=["name", "item_code", "lead_time", "bom_level", "target_date"],
         values=final_values,
         ignore_duplicates=True,
     )
@@ -128,6 +132,7 @@ def process_mrp_item_entries():
     #TODO: update_forecast_demand()
     update_scheduled_receipts()
     calculate_totals()
+    calculate_suggestions_and_projected_stock()
 
 def update_open_orders_demand():
     _update_reserved_qty()
@@ -137,16 +142,6 @@ def update_open_orders_demand():
 def update_scheduled_receipts():
     _update_planned_qty()
     _update_ordered_qty()
-
-def calculate_totals():
-    update_query = f"""
-        UPDATE `tabMRP Entry`
-        SET
-            open_orders = COALESCE(reserved_qty, 0) + COALESCE(reserved_qty_for_production, 0) + COALESCE(upstream_so_demand, 0),
-            total_forecast_demand = COALESCE(forecast_demand, 0) + COALESCE(upstream_forecast_demand, 0),
-            scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
-    """
-    frappe.db.sql(update_query)
 
 def _update_reserved_qty():
     """
@@ -497,3 +492,81 @@ def _update_ordered_qty():
         WHERE name IN ({names_str});
     """
     frappe.db.sql(update_query)
+
+def calculate_totals():
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET
+            open_orders = COALESCE(reserved_qty, 0) + COALESCE(reserved_qty_for_production, 0) + COALESCE(upstream_so_demand, 0),
+            total_forecast_demand = COALESCE(forecast_demand, 0) + COALESCE(upstream_forecast_demand, 0),
+            scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
+    """
+    frappe.db.sql(update_query)
+
+def calculate_suggestions_and_projected_stock():
+
+    # Get stock levels
+    filters = frappe._dict({
+        "from_date": datetime.date.today(),
+        "to_date": datetime.date.today()
+    })
+    stock_level_report = execute_stock_balance_report(filters=filters)
+    # First row cotains headers, second row contains data
+    stock_levels = stock_level_report[1]
+
+    # Get Re-order details
+    items_reorder_details = frappe.get_all("Item Reorder", filters={"material_request_type": "Purchase"}, fields=["parent", "warehouse_reorder_level", "warehouse_reorder_qty"])
+
+    # Get Item Codes
+    unique_items = frappe.db.sql(
+        """
+        SELECT DISTINCT item_code
+        FROM `tabMRP Entry`
+        """
+    , pluck=True)
+    for item_code in unique_items:
+        # Get MRP Entries for single item ranging over next few periods
+        mrp_entries = frappe.get_all("MRP Entry", filters={"item_code": item_code}, order_by="target_date asc")
+        mrp_entry_docs = [
+            frappe.get_doc("MRP Entry", entry.name) for entry in mrp_entries
+        ]
+
+        # Set current stock level as starting stock on hand
+        mrp_entry_docs[0].on_hand_inventory = sum([stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code])
+
+        # Get item's re-order details
+        item_reorder_details = next((detail for detail in items_reorder_details if detail.parent == item_code), None)
+
+        for index, entry in enumerate(mrp_entry_docs):
+            # Set the starting SOH of the current entry to the projected SOH of the last entry
+            if index != 0:
+                entry.on_hand_inventory = mrp_entry_docs[index-1].projected_on_hand_inventory
+
+            # Set the re-order details
+            if item_reorder_details:
+                entry.reorder_level = item_reorder_details.warehouse_reorder_level
+                entry.reorder_quantity = item_reorder_details.warehouse_reorder_qty
+
+            # Determine if there is a shortage
+            shortage = entry.on_hand_inventory - entry.open_orders - entry.total_forecast_demand + entry.scheduled_receipts - entry.reorder_level
+            if shortage < 0:
+                shortage *= -1
+                moq = entry.reorder_quantity or 1
+                entry.suggested_receipts = math.ceil(shortage / moq) * moq
+            
+            entry.projected_on_hand_inventory = entry.on_hand_inventory - entry.open_orders - entry.total_forecast_demand + entry.scheduled_receipts + entry.suggested_receipts
+            
+        # Based on lead time, set the suggested order qty for the correct earlier entry
+        is_urgent = 0
+        for index, entry in reversed(list(enumerate(mrp_entry_docs))):
+            if entry.suggested_receipts and entry.lead_time:
+                weeks_before = math.ceil(entry.lead_time / 7)
+                # If we should have ordered already, flag this entry
+                if index - weeks_before < 0:
+                    is_urgent = 1
+                    mrp_entry_docs[0].suggested_orders += entry.suggested_receipts
+                else:
+                    mrp_entry_docs[index - weeks_before].suggested_orders += entry.suggested_receipts
+
+            entry.is_urgent = is_urgent
+            entry.save()

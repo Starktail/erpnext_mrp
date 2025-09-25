@@ -81,7 +81,7 @@
   },
   {
    "fieldname": "lead_time",
-   "fieldtype": "Duration",
+   "fieldtype": "Int",
    "hide_seconds": 1,
    "label": "Lead Time"
   },
@@ -212,7 +212,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 21:21:19.837021",
+ "modified": "2025-09-25 22:44:43.575647",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
