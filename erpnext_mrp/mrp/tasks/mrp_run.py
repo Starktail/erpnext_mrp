@@ -127,6 +127,7 @@ def process_mrp_item_entries():
     update_open_orders_demand()
     #TODO: update_forecast_demand()
     update_scheduled_receipts()
+    calculate_totals()
 
 def update_open_orders_demand():
     _update_reserved_qty()
@@ -136,6 +137,16 @@ def update_open_orders_demand():
 def update_scheduled_receipts():
     _update_planned_qty()
     _update_ordered_qty()
+
+def calculate_totals():
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET
+            open_orders = COALESCE(reserved_qty, 0) + COALESCE(reserved_qty_for_production, 0) + COALESCE(upstream_so_demand, 0),
+            total_forecast_demand = COALESCE(forecast_demand, 0) + COALESCE(upstream_forecast_demand, 0),
+            scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
+    """
+    frappe.db.sql(update_query)
 
 def _update_reserved_qty():
     """
