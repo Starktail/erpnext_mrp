@@ -124,13 +124,18 @@ def process_mrp_item_entries():
     """
     Main background task to process all MRP calculations for each item and period.
     """
-    update_open_orders()
-    # Future calculation steps will be called here
+    update_open_orders_demand()
+    #TODO: update_forecast_demand()
+    update_scheduled_receipts()
 
-def update_open_orders():
+def update_open_orders_demand():
     _update_reserved_qty()
     _update_reserved_qty_for_production()
 
+
+def update_scheduled_receipts():
+    _update_planned_qty()
+    _update_ordered_qty()
 
 def _update_reserved_qty():
     """
@@ -236,7 +241,7 @@ def _update_reserved_qty():
 
 def _update_reserved_qty_for_production():
     """
-    Calculates material requirements from open Work Orders and adds them to the 'reserved_qty_for_production' field.
+    Calculates material requirements from open Work Orders for each item and week, then bulk updates MRP Entry
 
     Same as Bin > reserved_qty_for_production.
     Based on erpnext/manufacturing/doctype/work_order/work_order.py > get_reserved_qty_for_production
@@ -274,7 +279,7 @@ def _update_reserved_qty_for_production():
         mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
         mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
         update_cases.append(
-            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(open_orders, 0) + {row.total_required_qty}"
+            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(reserved_qty_for_production, 0) + {row.total_required_qty}"
         )
 
     if not mrp_entry_names:
@@ -288,6 +293,126 @@ def _update_reserved_qty_for_production():
         SET reserved_qty_for_production = CASE
             {case_str}
             ELSE reserved_qty_for_production
+        END
+        WHERE name IN ({names_str});
+    """
+    frappe.db.sql(update_query)
+
+
+def _update_planned_qty():
+    """
+    Calculates open Work Order quantities (planned receipts) for each item and week,
+    then bulk updates the 'scheduled_receipts' field in MRP Entry.
+    Equivalent to Bin > planned_qty.
+    """
+    settings = frappe.get_cached_doc("MRP Settings")
+    look_ahead = settings.look_ahead or 6
+    start_date = datetime.date.today()
+    end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+    sql_query = f"""
+        SELECT
+            production_item,
+            DATE_FORMAT(planned_start_date, '%%YCW%%v') AS calendar_week,
+            SUM(qty - produced_qty) AS total_planned_qty
+        FROM `tabWork Order`
+        WHERE
+            status NOT IN ('Stopped', 'Completed', 'Closed', 'Cancelled')
+            AND docstatus = 1
+            AND qty > produced_qty
+            AND planned_start_date BETWEEN %(start_date)s AND %(end_date)s
+        GROUP BY
+            production_item,
+            calendar_week;
+    """
+    planned_data = frappe.db.sql(
+        sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+    )
+
+    if not planned_data:
+        return
+
+    update_cases = []
+    mrp_entry_names = []
+    for row in planned_data:
+        mrp_entry_name = f"{row.production_item}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(
+            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(planned_qty, 0) + {row.total_planned_qty}"
+        )
+
+    if not mrp_entry_names:
+        return
+
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
+
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET planned_qty = CASE
+            {case_str}
+            ELSE planned_qty
+        END
+        WHERE name IN ({names_str});
+    """
+    frappe.db.sql(update_query)
+
+
+def _update_ordered_qty():
+    """
+    Calculates open Purchase Order quantities (ordered receipts) for each item and week,
+    then bulk updates the 'scheduled_receipts' field in MRP Entry.
+    Equivalent to Bin > ordered_qty.
+    """
+    settings = frappe.get_cached_doc("MRP Settings")
+    look_ahead = settings.look_ahead or 6
+    start_date = datetime.date.today()
+    end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+    sql_query = f"""
+        SELECT
+            po_item.item_code,
+            DATE_FORMAT(po_item.schedule_date, '%%YCW%%v') AS calendar_week,
+            SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty
+        FROM `tabPurchase Order Item` AS po_item
+        JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
+        WHERE
+            po_item.qty > po_item.received_qty
+            AND po.status NOT IN ('Closed', 'Delivered', 'Cancelled')
+            AND po.docstatus = 1
+            AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
+            AND po_item.schedule_date BETWEEN %(start_date)s AND %(end_date)s
+        GROUP BY
+            po_item.item_code,
+            calendar_week;
+    """
+    ordered_data = frappe.db.sql(
+        sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+    )
+
+    if not ordered_data:
+        return
+
+    update_cases = []
+    mrp_entry_names = []
+    for row in ordered_data:
+        mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(
+            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(ordered_qty, 0) + {row.total_ordered_qty}"
+        )
+
+    if not mrp_entry_names:
+        return
+
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
+
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET ordered_qty = CASE
+            {case_str}
+            ELSE ordered_qty
         END
         WHERE name IN ({names_str});
     """
