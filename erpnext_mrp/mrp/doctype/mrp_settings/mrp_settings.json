@@ -1,0 +1,56 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-09-25 19:33:00.541776",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "periods_type",
+  "look_ahead"
+ ],
+ "fields": [
+  {
+   "default": "Calendar Week",
+   "fieldname": "periods_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Periods Type",
+   "options": "Calendar Week",
+   "reqd": 1
+  },
+  {
+   "default": "6",
+   "description": "Higher values may have a performance impact",
+   "fieldname": "look_ahead",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Look Ahead",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-09-25 19:35:05.587392",
+ "modified_by": "Administrator",
+ "module": "MRP",
+ "name": "MRP Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

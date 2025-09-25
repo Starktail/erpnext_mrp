@@ -1,19 +1,18 @@
+import datetime
+import itertools
+
 import frappe
+from frappe import _
 
 
 @frappe.whitelist()
-def update_mrp_item_entries():
+def create_mrp_item_entries():
     """
-    Calculate the BOM level for all stock items and bulk insert them into the MRP Entry table.
+    Calculate BOM levels and create MRP Entry records for each item for each week in a look-ahead period.
 
-    This function is idempotent: it clears all existing MRP Entry records before inserting
-    the newly calculated levels. The BOM level is determined by the deepest nesting level of an item in all **default** BOMs.
-    - Level 0: Top-level items that are not used as components in any other default BOM.
-    - Level n: Components that are n levels deep in a default BOM hierarchy.
-
-    This implementation uses a raw recursive SQL query for better performance.
-
-    We use frappe.db.sql because WITH RECURSIVE is a special construct that frappe.qb/pypika do not expose.
+    This function is idempotent: it clears all existing MRP Entry records before inserting new ones.
+    It uses a performant SQL query to get item levels and `itertools` to efficiently combine
+    items with time periods, avoiding slow loops.
     """
     # 1. Clear all existing records from the MRP Entry table
     frappe.db.delete("MRP Entry")
@@ -68,7 +67,6 @@ def update_mrp_item_entries():
         )
         -- Final Selection
         SELECT
-            t_item.name AS name,
             t_item.name AS item_code,
             COALESCE(bl.bom_level, 0) AS bom_level
         FROM
@@ -81,21 +79,41 @@ def update_mrp_item_entries():
     """
     item_list = frappe.db.sql(sql_query)
 
-    # 3. Perform a bulk insert of the results
-    if not item_list:
-        frappe.log_info("No items to update in MRP Entry.", "MRP Item Level Update")
-        return
+    # 3. Generate weekly periods for the look-ahead horizon
+    settings = frappe.get_cached_doc("MRP Settings")
+    if settings.periods_type != "Calendar Week":
+        raise ValueError(_("Only 'Calendar Week' is a supported period type"))
+    look_ahead = settings.look_ahead or 6
 
-    # Prepare records for bulk insert
-    # mrp_entries_to_save = []
-    # for item in item_list:
-    #     mrp_entry = frappe.new_doc("MRP Entry")
-    #     mrp_entry.update(item)
-    #     mrp_entries_to_save.append(mrp_entry)
+    today = datetime.date.today()
+    # Use a dictionary to store unique periods with their target dates
+    periods = {}
+    for i in range(look_ahead):
+        target_date = today + datetime.timedelta(weeks=i)
+        year, week, _ = target_date.isocalendar()
+        period_str = f"-{year}CW{week:02d}"
+        if period_str not in periods:
+            periods[period_str] = target_date
 
-    frappe.db.bulk_insert("MRP Entry", fields=["name", "item_code", "bom_level"], values=item_list, ignore_duplicates=True)
+    # Convert to a list of items for itertools
+    period_data = list(periods.items())
 
-    frappe.msgprint(
-        f"Successfully updated {len(item_list)} records in MRP Entry.",
-        "MRP Item Level Update",
+    # 4. Efficiently combine items and periods and prepare for bulk insert
+    # item is a tuple: (item_code, bom_level)
+    # period is a tuple: (period_str, target_date)
+    final_values = [
+        (f"{item[0]}{period[0]}", item[0], item[1], period[1])
+        for item, period in itertools.product(item_list, period_data)
+    ]
+    # 5. Perform a bulk insert of all generated records
+    frappe.db.bulk_insert(
+        "MRP Entry",
+        fields=["name", "item_code", "bom_level", "target_date"],
+        values=final_values,
+        ignore_duplicates=True,
     )
+
+
+@frappe.whitelist()
+def process_mrp_item_entries():
+    pass

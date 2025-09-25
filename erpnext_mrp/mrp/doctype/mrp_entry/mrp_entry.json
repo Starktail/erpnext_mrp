@@ -8,6 +8,7 @@
  "field_order": [
   "item_code",
   "bom_level",
+  "target_date",
   "item_name",
   "item_group",
   "uom",
@@ -124,12 +125,18 @@
    "fieldtype": "Int",
    "label": "BOM Level",
    "reqd": 1
+  },
+  {
+   "fieldname": "target_date",
+   "fieldtype": "Date",
+   "label": "Target Date",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 19:26:55.510019",
+ "modified": "2025-09-25 19:52:20.920848",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
