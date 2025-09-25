@@ -140,7 +140,7 @@ def _update_reserved_qty():
     modified to group results by the calendar week of the Sales Order Item's delivery date.
 
     Same as Bin > reserved_qty.
-    Based on frappe-bench-v15/apps/erpnext/erpnext/stock/stock_balance.py > get_reserved_qty	
+    Based on erpnext/stock/stock_balance.py > get_reserved_qty	
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
@@ -236,7 +236,10 @@ def _update_reserved_qty():
 
 def _update_reserved_qty_for_production():
     """
-    Calculates material requirements from open Work Orders and adds them to the 'open_orders' field.
+    Calculates material requirements from open Work Orders and adds them to the 'reserved_qty_for_production' field.
+
+    Same as Bin > reserved_qty_for_production.
+    Based on erpnext/manufacturing/doctype/work_order/work_order.py > get_reserved_qty_for_production
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6

@@ -194,19 +194,19 @@
    "description": "Upstream Sales Order Demand based on BOM",
    "fieldname": "upstream_so_demand",
    "fieldtype": "Float",
-   "label": "Upstream Sales Order demand"
+   "label": "Upstream Sales Order Demand"
   },
   {
    "description": "Upstream Forecast Demand based on BOM",
    "fieldname": "upstream_forecast_demand",
    "fieldtype": "Float",
-   "label": "Upstream Forecast demand"
+   "label": "Upstream Forecast Demand"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 20:39:55.116220",
+ "modified": "2025-09-25 20:40:46.507607",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
