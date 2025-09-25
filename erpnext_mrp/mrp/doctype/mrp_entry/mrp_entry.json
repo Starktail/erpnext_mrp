@@ -21,10 +21,14 @@
   "open_orders",
   "reserved_qty",
   "reserved_qty_for_production",
+  "upstream_so_demand",
   "forecast_demand_section",
   "forecast_demand",
+  "upstream_forecast_demand",
   "scheduled_receipts_section",
   "scheduled_receipts",
+  "planned_qty",
+  "ordered_qty",
   "section_break_sgyw",
   "suggested_receipts",
   "suggested_orders",
@@ -105,7 +109,7 @@
    "label": "Forecast Demand"
   },
   {
-   "description": "For final products: Total qty that is has existing open Work Orders for this period\n<br>\nFor sub-assemblies: Total qty that is has existing open Work Orders for this period\n<br>\nFor purchase items: Total qty that is has existing open Purchase Orders for this period",
+   "description": "For final products: Total qty that is has existing open Work Orders for this period\n<br>\nFor sub-assemblies: Total qty that is has existing open Work Orders for this period\n<br>\nFor purchase items: Total qty that is has existing open Purchase Orders for this period\n<br>\n<br>\n<code>Planned Qty + Ordered Qty</code>",
    "fieldname": "scheduled_receipts",
    "fieldtype": "Float",
    "label": "Scheduled Receipts"
@@ -142,7 +146,7 @@
   {
    "fieldname": "open_orders_section",
    "fieldtype": "Section Break",
-   "label": "Open Orders"
+   "label": "Open Orders Demand"
   },
   {
    "description": "Looks at <b>Sales Orders</b>",
@@ -173,12 +177,36 @@
   {
    "fieldname": "section_break_gruc",
    "fieldtype": "Section Break"
+  },
+  {
+   "description": "Looks at <b>Work Orders</b>",
+   "fieldname": "planned_qty",
+   "fieldtype": "Float",
+   "label": "Planned Qty"
+  },
+  {
+   "description": "Looks at <b>Purchase Orders</b>",
+   "fieldname": "ordered_qty",
+   "fieldtype": "Float",
+   "label": "Ordered Qty"
+  },
+  {
+   "description": "Upstream Sales Order Demand based on BOM",
+   "fieldname": "upstream_so_demand",
+   "fieldtype": "Float",
+   "label": "Upstream Sales Order demand"
+  },
+  {
+   "description": "Upstream Forecast Demand based on BOM",
+   "fieldname": "upstream_forecast_demand",
+   "fieldtype": "Float",
+   "label": "Upstream Forecast demand"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 20:20:01.613832",
+ "modified": "2025-09-25 20:39:55.116220",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
