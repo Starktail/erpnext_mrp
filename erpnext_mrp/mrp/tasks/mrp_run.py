@@ -131,108 +131,161 @@ def update_open_orders():
     _update_reserved_qty()
     _update_reserved_qty_for_production()
 
-    def _update_reserved_qty():
-        """
-        Calculates open sales order quantities for each item and week, then bulk updates MRP Entry.
 
-        This query is an adaptation of the standard ERPNext reserved quantity calculation,
-        modified to group results by the calendar week of the Sales Order Item's delivery date.
+def _update_reserved_qty():
+    """
+    Calculates open sales order quantities for each item and week, then bulk updates MRP Entry.
 
-        Same as Bin > reserved_qty.
-        Based on frappe-bench-v15/apps/erpnext/erpnext/stock/stock_balance.py > get_reserved_qty	
-        """
-        settings = frappe.get_cached_doc("MRP Settings")
-        look_ahead = settings.look_ahead or 6
-        start_date = datetime.date.today()
-        end_date = start_date + datetime.timedelta(weeks=look_ahead)
+    This query is an adaptation of the standard ERPNext reserved quantity calculation,
+    modified to group results by the calendar week of the Sales Order Item's delivery date.
 
-        # Note: DATE_FORMAT(date, '%%YCW%%v') is used to create the week string, e.g., '2025CW39'.
-        # The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
-        sql_query = f"""
+    Same as Bin > reserved_qty.
+    Based on frappe-bench-v15/apps/erpnext/erpnext/stock/stock_balance.py > get_reserved_qty	
+    """
+    settings = frappe.get_cached_doc("MRP Settings")
+    look_ahead = settings.look_ahead or 6
+    start_date = datetime.date.today()
+    end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+    # Note: DATE_FORMAT(date, '%%YCW%%v') is used to create the week string, e.g., '2025CW39'.
+    # The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
+    sql_query = f"""
+        SELECT
+            item_code,
+            DATE_FORMAT(delivery_date, '%%YCW%%v') AS calendar_week,
+            SUM(reserved_qty) AS total_reserved_qty
+        FROM (
             SELECT
                 item_code,
-                DATE_FORMAT(delivery_date, '%%YCW%%v') AS calendar_week,
-                SUM(reserved_qty) AS total_reserved_qty
+                delivery_date,
+                (
+                    dnpi_qty * (
+                        (so_item_qty - so_item_delivered_qty - IF(dont_reserve_qty_on_return, so_item_returned_qty, 0))
+                        / so_item_qty
+                    )
+                ) AS reserved_qty
             FROM (
                 SELECT
-                    item_code,
-                    delivery_date,
-                    (
-                        dnpi_qty * (
-                            (so_item_qty - so_item_delivered_qty - IF(dont_reserve_qty_on_return, so_item_returned_qty, 0))
-                            / so_item_qty
-                        )
-                    ) AS reserved_qty
-                FROM (
-                    SELECT
-                        dnpi.item_code,
-                        dnpi.qty AS dnpi_qty,
-                        soi.qty AS so_item_qty,
-                        soi.delivered_qty AS so_item_delivered_qty,
-                        soi.returned_qty AS so_item_returned_qty,
-                        soi.delivery_date,
-                        0 AS dont_reserve_qty_on_return
-                    FROM `tabPacked Item` AS dnpi
-                    JOIN `tabSales Order Item` AS soi ON dnpi.parent_detail_docname = soi.name
-                    JOIN `tabSales Order` AS so ON dnpi.parent = so.name
-                    WHERE so.docstatus = 1
-                        AND so.status NOT IN ('On Hold', 'Closed')
-                        AND (soi.delivered_by_supplier IS NULL OR soi.delivered_by_supplier = 0)
-                        AND dnpi.item_code != dnpi.parent_item
+                    dnpi.item_code,
+                    dnpi.qty AS dnpi_qty,
+                    soi.qty AS so_item_qty,
+                    soi.delivered_qty AS so_item_delivered_qty,
+                    soi.returned_qty AS so_item_returned_qty,
+                    soi.delivery_date,
+                    0 AS dont_reserve_qty_on_return
+                FROM `tabPacked Item` AS dnpi
+                JOIN `tabSales Order Item` AS soi ON dnpi.parent_detail_docname = soi.name
+                JOIN `tabSales Order` AS so ON dnpi.parent = so.name
+                WHERE so.docstatus = 1
+                    AND so.status NOT IN ('On Hold', 'Closed')
+                    AND (soi.delivered_by_supplier IS NULL OR soi.delivered_by_supplier = 0)
+                    AND dnpi.item_code != dnpi.parent_item
 
-                    UNION ALL
+                UNION ALL
 
-                    SELECT
-                        so_item.item_code,
-                        so_item.stock_qty AS dnpi_qty,
-                        so_item.qty AS so_item_qty,
-                        so_item.delivered_qty AS so_item_delivered_qty,
-                        so_item.returned_qty AS so_item_returned_qty,
-                        so_item.delivery_date,
-                        0 AS dont_reserve_qty_on_return
-                    FROM `tabSales Order Item` AS so_item
-                    JOIN `tabSales Order` AS so ON so_item.parent = so.name
-                    WHERE so.docstatus = 1
-                        AND so.status NOT IN ('On Hold', 'Closed')
-                        AND (so_item.delivered_by_supplier IS NULL OR so_item.delivered_by_supplier = 0)
-                ) AS combined_so_items
-                WHERE so_item_qty >= so_item_delivered_qty
-            ) AS final_so_data
-            WHERE delivery_date BETWEEN %(start_date)s AND %(end_date)s
-            GROUP BY item_code, calendar_week;
-        """
-        open_orders_data = frappe.db.sql(
-            sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+                SELECT
+                    so_item.item_code,
+                    so_item.stock_qty AS dnpi_qty,
+                    so_item.qty AS so_item_qty,
+                    so_item.delivered_qty AS so_item_delivered_qty,
+                    so_item.returned_qty AS so_item_returned_qty,
+                    so_item.delivery_date,
+                    0 AS dont_reserve_qty_on_return
+                FROM `tabSales Order Item` AS so_item
+                JOIN `tabSales Order` AS so ON so_item.parent = so.name
+                WHERE so.docstatus = 1
+                    AND so.status NOT IN ('On Hold', 'Closed')
+                    AND (so_item.delivered_by_supplier IS NULL OR so_item.delivered_by_supplier = 0)
+            ) AS combined_so_items
+            WHERE so_item_qty >= so_item_delivered_qty
+        ) AS final_so_data
+        WHERE delivery_date BETWEEN %(start_date)s AND %(end_date)s
+        GROUP BY item_code, calendar_week;
+    """
+    open_orders_data = frappe.db.sql(
+        sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+    )
+
+    if not open_orders_data:
+        return
+
+    # Use a CASE statement for efficient bulk updates
+    update_cases = []
+    mrp_entry_names = []
+    for row in open_orders_data:
+        mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN {row.total_reserved_qty}")
+
+    if not mrp_entry_names:
+        return
+
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
+
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET reserved_qty = CASE
+            {case_str}
+            ELSE reserved_qty
+        END
+        WHERE name IN ({names_str})
+    """
+    frappe.db.sql(update_query)
+
+
+def _update_reserved_qty_for_production():
+    """
+    Calculates material requirements from open Work Orders and adds them to the 'open_orders' field.
+    """
+    settings = frappe.get_cached_doc("MRP Settings")
+    look_ahead = settings.look_ahead or 6
+    start_date = datetime.date.today()
+    end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+    sql_query = f"""
+        SELECT
+            wo_item.item_code,
+            DATE_FORMAT(wo.planned_start_date, '%%YCW%%v') AS calendar_week,
+            SUM(wo_item.required_qty - wo_item.transferred_qty) AS total_required_qty
+        FROM `tabWork Order Item` AS wo_item
+        JOIN `tabWork Order` AS wo ON wo_item.parent = wo.name
+        WHERE wo.docstatus = 1
+            AND wo.status NOT IN ('Completed', 'Stopped', 'Closed', 'Cancelled')
+            AND wo.planned_start_date BETWEEN %(start_date)s AND %(end_date)s
+            AND (wo_item.required_qty > wo_item.transferred_qty)
+        GROUP BY
+            wo_item.item_code,
+            calendar_week;
+    """
+    production_demand_data = frappe.db.sql(
+        sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+    )
+
+    if not production_demand_data:
+        return
+
+    update_cases = []
+    mrp_entry_names = []
+    for row in production_demand_data:
+        mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(
+            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(open_orders, 0) + {row.total_required_qty}"
         )
 
-        if not open_orders_data:
-            return
+    if not mrp_entry_names:
+        return
 
-        # Use a CASE statement for efficient bulk updates
-        update_cases = []
-        mrp_entry_names = []
-        for row in open_orders_data:
-            mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
-            # Ensure names are properly escaped for the SQL query
-            mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
-            update_cases.append(f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN {row.total_reserved_qty}")
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
 
-        if not mrp_entry_names:
-            return
-
-        case_str = " ".join(update_cases)
-        names_str = ", ".join(mrp_entry_names)
-
-        update_query = f"""
-            UPDATE `tabMRP Entry`
-            SET reserved_qty = CASE
-                {case_str}
-                ELSE reserved_qty
-            END
-            WHERE name IN ({names_str})
-        """
-        frappe.db.sql(update_query)
-    
-    
-    def _update_reserved_qty_for_production():
-        pass
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET reserved_qty_for_production = CASE
+            {case_str}
+            ELSE reserved_qty_for_production
+        END
+        WHERE name IN ({names_str});
+    """
+    frappe.db.sql(update_query)
