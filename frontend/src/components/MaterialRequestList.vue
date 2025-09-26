@@ -156,8 +156,8 @@ export default {
         { field: 'item_name', headerName: 'Item Name', sortable: true, filter: true, pinned: 'left' },
         { field: 'item_group', headerName: 'Item Group', sortable: true, filter: true, width: 120 },
         { field: 'uom', headerName: 'Uom', sortable: true, filter: true, width: 100 },
-        { field: 'reorder_level', headerName: 'Reorder Level', sortable: true, filter: true, width: 100 },
-        { field: 'reorder_quantity', headerName: 'Re-order Quantity', sortable: true, filter: true, width: 100 },
+        { field: 'reorder_level', headerName: 'Reorder Level', sortable: true, filter: true, width: 110 },
+        { field: 'reorder_quantity', headerName: 'Re-order Quantity', sortable: true, filter: true, width: 110 },
         { field: 'lead_time', headerName: 'Lead Time', sortable: true, filter: true, width: 100 },
         { field: 'is_urgent', headerName: 'Urgent', sortable: true, filter: true, width: 100 },
       ];
