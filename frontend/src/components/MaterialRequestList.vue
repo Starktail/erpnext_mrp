@@ -94,7 +94,7 @@ export default {
         ],
         orderBy: 'creation desc',
         start: 0,
-        pageLength: 1000,
+        pageLength: 10000,
         auto: true,
       }
     },
