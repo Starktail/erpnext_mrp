@@ -197,19 +197,32 @@ export default {
       ];
 
       const dynamicColumns = sortedWeeks.map(weekKey => {
+          const openChildren = quantityFields.map(qField => ({
+              field: `${weekKey}_${qField.field}`,
+              headerName: qField.headerName,
+              columnGroupShow: 'open',
+              sortable: true,
+              filter: true,
+              width: 120
+          }));
+
+          const closedChild = {
+              field: `${weekKey}_on_hand_inventory2`,
+              headerName: 'On Hand Inventory',
+              columnGroupShow: 'closed',
+              sortable: true,
+              filter: true,
+              width: 120
+          };
+
           return {
               headerName: weekKey,
               groupId: weekKey,
-              children: quantityFields.map(qField => ({
-                  field: `${weekKey}_${qField.field}`,
-                  headerName: qField.headerName,
-                  sortable: true,
-                  filter: true,
-                  width: 120
-              }))
+              children: [closedChild, ...openChildren]
           };
       });
 
+      console.log("dynamicColumns", dynamicColumns)
       return staticColumns.concat(dynamicColumns, actionsColumn);
     },
     isLoading() {
@@ -222,10 +235,12 @@ export default {
       this.columnApi = params.columnApi;
     },
     expandAll() {
-      this.columnApi.setColumnGroupOpened(null, true);
+      const columnIds = this.columnApi.getAllColumnGroups().map(group => group.getGroupId());
+      this.columnApi.setColumnGroupOpened(columnIds, true);
     },
     collapseAll() {
-      this.columnApi.setColumnGroupOpened(null, false);
+      const columnIds = this.columnApi.getAllColumnGroups().map(group => group.getGroupId());
+      this.columnApi.setColumnGroupOpened(columnIds, false);
     },
     clearFilters() {
       this.gridApi.setFilterModel(null);
