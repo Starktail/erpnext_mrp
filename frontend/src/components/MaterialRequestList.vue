@@ -18,6 +18,7 @@
         autoHeaderHeight: true,
         resizable: true
       }"
+      :getRowStyle="getRowStyle"
       @grid-ready="onGridReady"
     />
     <Dialog v-model="showDialog" title="Material Request Details" @hide="showDialog = false">
@@ -249,6 +250,12 @@ export default {
     },
     getRowId(params) {
       return params.data.name;
+    },
+    getRowStyle(params) {
+      if (params.data && params.data.is_urgent === 1) {
+        return { background: '#ffdddd' };
+      }
+      return null;
     },
     // From https://stackoverflow.com/a/6117889
     getWeekNumber(d) {
