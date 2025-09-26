@@ -4,6 +4,7 @@
       <Button @click="expandAll">Expand All</Button>
       <Button @click="collapseAll">Collapse All</Button>
       <Button @click="clearFilters">Clear Filters</Button>
+      <Button @click="reload">Reload</Button>
     </div>
     <ag-grid-vue
       class="ag-theme-alpine w-full flex-grow"
@@ -228,6 +229,9 @@ export default {
     },
     clearFilters() {
       this.gridApi.setFilterModel(null);
+    },
+    reload() {
+      this.$resources.material_requests.reload();
     },
     handleOpenDialog() { // New method to be called by the button in the cell
       this.showDialog = true;
