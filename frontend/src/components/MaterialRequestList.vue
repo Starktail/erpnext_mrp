@@ -1,8 +1,6 @@
 <template>
   <div class="h-full flex flex-col">
     <div class="mb-4 flex gap-2 items-center">
-      <Button @click="expandAll">Expand All</Button>
-      <Button @click="collapseAll">Collapse All</Button>
       <Button @click="clearFilters">Clear Filters</Button>
       <Button @click="reload">Reload</Button>
       <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
@@ -44,7 +42,7 @@ export default {
   components: {
     AgGridVue,
     Dialog, // Register the Dialog component
-    Combobox, // Register the Dialog component
+    Combobox, // Register the Combobox component
     buttonCellRenderer: { 
       name: 'ButtonCellRenderer',
       template: `<Button @click="onButtonClick">Planning Detail</Button>`,
@@ -69,8 +67,8 @@ export default {
     return {
       gridApi: null,
       columnApi: null,
-      showDialog: false, // New data property
-      closed_column_field: 'on_hand_inventory',
+      showDialog: false,
+      closed_column_field: 'suggested_orders',
     };
   },
   resources: {
@@ -217,7 +215,6 @@ export default {
           };
       });
 
-      console.log("dynamicColumns", dynamicColumns)
       return staticColumns.concat(dynamicColumns, actionsColumn);
     },
     quantityFields() {
@@ -239,14 +236,6 @@ export default {
     onGridReady(params) {
       this.gridApi = params.api;
       this.columnApi = params.columnApi;
-    },
-    expandAll() {
-      const columnIds = this.columnApi.getAllColumnGroups().map(group => group.getGroupId());
-      this.columnApi.setColumnGroupOpened(columnIds, true);
-    },
-    collapseAll() {
-      const columnIds = this.columnApi.getAllColumnGroups().map(group => group.getGroupId());
-      this.columnApi.setColumnGroupOpened(columnIds, false);
     },
     clearFilters() {
       this.gridApi.setFilterModel(null);
