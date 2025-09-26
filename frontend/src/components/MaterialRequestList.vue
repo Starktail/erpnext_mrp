@@ -190,6 +190,7 @@ export default {
 
       const dynamicColumns = sortedWeeks.map(weekKey => {
           const openChildren = this.quantityFields.map(qField => ({
+              ...qField,
               field: `${weekKey}_${qField.value}`,
               headerName: qField.label,
               columnGroupShow: 'open',
@@ -209,6 +210,10 @@ export default {
               width: 120
           };
 
+          if (closedField.value === 'suggested_orders') {
+            closedChild.cellStyle = params => params.value > 0 ? { background: '#ddeeff' } : null;
+          }
+
           return {
               headerName: weekKey,
               groupId: weekKey,
@@ -225,7 +230,7 @@ export default {
           { value: 'forecast_demand', label: 'Forecast Demand' },
           { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
           { value: 'suggested_receipts', label: 'Suggested Receipts' },
-          { value: 'suggested_orders', label: 'Suggested Orders' },
+          { value: 'suggested_orders', label: 'Suggested Orders', cellStyle: params => params.value > 0 ? { background: '#ddeeff' } : null },
           { value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
       ];
     },
