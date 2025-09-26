@@ -3,6 +3,7 @@
     <div class="mb-4 flex gap-2">
       <Button @click="expandAll">Expand All</Button>
       <Button @click="collapseAll">Collapse All</Button>
+      <Button @click="clearFilters">Clear Filters</Button>
     </div>
     <ag-grid-vue
       class="ag-theme-alpine w-full flex-grow"
@@ -224,6 +225,9 @@ export default {
     },
     collapseAll() {
       this.columnApi.setColumnGroupOpened(null, false);
+    },
+    clearFilters() {
+      this.gridApi.setFilterModel(null);
     },
     handleOpenDialog() { // New method to be called by the button in the cell
       this.showDialog = true;
