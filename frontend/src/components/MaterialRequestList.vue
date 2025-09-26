@@ -1,10 +1,11 @@
 <template>
   <div class="h-full flex flex-col">
-    <div class="mb-4 flex gap-2">
+    <div class="mb-4 flex gap-2 items-center">
       <Button @click="expandAll">Expand All</Button>
       <Button @click="collapseAll">Collapse All</Button>
       <Button @click="clearFilters">Clear Filters</Button>
       <Button @click="reload">Reload</Button>
+      <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
     </div>
     <ag-grid-vue
       class="ag-theme-alpine w-full flex-grow"
@@ -36,13 +37,14 @@
 <script>
 import { AgGridVue } from "ag-grid-vue3";
 // AG Grid CSS is now imported in main.js
-import { Button, Dialog } from 'frappe-ui'; // Import Button and Dialog components
+import { Button, Dialog, Combobox } from 'frappe-ui'; // Import Button and Dialog components
 
 export default {
   name: 'MaterialRequestList',
   components: {
     AgGridVue,
     Dialog, // Register the Dialog component
+    Combobox, // Register the Dialog component
     buttonCellRenderer: { 
       name: 'ButtonCellRenderer',
       template: `<Button @click="onButtonClick">Planning Detail</Button>`,
@@ -68,6 +70,7 @@ export default {
       gridApi: null,
       columnApi: null,
       showDialog: false, // New data property
+      closed_column_field: 'on_hand_inventory',
     };
   },
   resources: {
@@ -186,29 +189,21 @@ export default {
 
       const sortedWeeks = Array.from(weeks).sort();
 
-      const quantityFields = [
-          { field: 'on_hand_inventory', headerName: 'On Hand Inventory' },
-          { field: 'open_orders', headerName: 'Open Orders' },
-          { field: 'forecast_demand', headerName: 'Forecast Demand' },
-          { field: 'scheduled_receipts', headerName: 'Scheduled Receipts' },
-          { field: 'suggested_receipts', headerName: 'Suggested Receipts' },
-          { field: 'suggested_orders', headerName: 'Suggested Orders' },
-          { field: 'projected_on_hand_inventory', headerName: 'Projected On Hand Inventory' },
-      ];
-
       const dynamicColumns = sortedWeeks.map(weekKey => {
-          const openChildren = quantityFields.map(qField => ({
-              field: `${weekKey}_${qField.field}`,
-              headerName: qField.headerName,
+          const openChildren = this.quantityFields.map(qField => ({
+              field: `${weekKey}_${qField.value}`,
+              headerName: qField.label,
               columnGroupShow: 'open',
               sortable: true,
               filter: true,
               width: 120
           }));
 
+          const closedField = this.quantityFields.find(f => f.value === this.closed_column_field);
+
           const closedChild = {
-              field: `${weekKey}_on_hand_inventory2`,
-              headerName: 'On Hand Inventory',
+              field: `${weekKey}_${closedField.value}`,
+              headerName: closedField.label,
               columnGroupShow: 'closed',
               sortable: true,
               filter: true,
@@ -224,6 +219,17 @@ export default {
 
       console.log("dynamicColumns", dynamicColumns)
       return staticColumns.concat(dynamicColumns, actionsColumn);
+    },
+    quantityFields() {
+      return [
+          { value: 'on_hand_inventory', label: 'On Hand Inventory' },
+          { value: 'open_orders', label: 'Open Orders' },
+          { value: 'forecast_demand', label: 'Forecast Demand' },
+          { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
+          { value: 'suggested_receipts', label: 'Suggested Receipts' },
+          { value: 'suggested_orders', label: 'Suggested Orders' },
+          { value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
+      ];
     },
     isLoading() {
       return this.$resources.material_requests.loading;
