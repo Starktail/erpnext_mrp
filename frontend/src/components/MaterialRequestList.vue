@@ -1,17 +1,16 @@
 <template>
-  <div>
+  <div class="h-full flex flex-col">
     <div class="mb-4 flex gap-2">
       <Button @click="expandAll">Expand All</Button>
       <Button @click="collapseAll">Collapse All</Button>
     </div>
     <ag-grid-vue
-      style="height: 500px;"
-      class="ag-theme-alpine w-full"
+      class="ag-theme-alpine w-full flex-grow"
       theme="legacy"
       :columnDefs="dynamicColumnDefs"
       :rowData="materialRequestRows"
       :pagination="true"
-      :paginationPageSize="10"
+      :paginationPageSize="100"
       :getRowId="getRowId"
       :defaultColDef="{
         wrapHeaderText: true,

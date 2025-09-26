@@ -1,5 +1,5 @@
 <template>
-  <div class="w-full px-4 py-12">
+  <div class="flex flex-col h-screen w-full px-4 py-12">
     <!-- <Button
       icon-left="code"
       @click="$resources.ping.fetch"
@@ -16,7 +16,7 @@
     <Dialog title="Title" v-model="showDialog"> Dialog content </Dialog>
     <Button variant="primary" @click="goToFrappe">Open Frappe App</Button> -->
     <h1 class="text-2xl font-bold mb-4">MRP Workbench</h1>
-    <MaterialRequestList class="mt-8" />
+    <MaterialRequestList class="mt-8 flex-grow" />
   </div>
 </template>
 
