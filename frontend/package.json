@@ -1,12 +1,12 @@
 {
   "name": "erpnext-mrp-ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "vite build --base=/assets/erpnext_mrp/frontend/ && yarn copy-html-entry",
-    "copy-html-entry": "cp ../crm/erpnext_mrp/frontend/index.html ../erpnext_mrp/www/erpnext_mrp.html",
+    "copy-html-entry": "cp ../erpnext_mrp/public/erpnext_mrp/index.html ../erpnext_mrp/www/erpnext_mrp.html",
     "preview": "vite preview"
   },
   "dependencies": {

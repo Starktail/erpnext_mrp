@@ -6,3 +6,8 @@ tags
 node_modules
 __pycache__
 .aider*
+
+dist/
+erpnext_mrp/public/erpnext_mrp
+erpnext_mrp/public/node_modules
+erpnext_mrp/www/erpnext_mrp.html

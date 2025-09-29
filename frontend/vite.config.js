@@ -12,6 +12,7 @@ export default defineConfig({
       jinjaBootData: true,
       buildConfig: {
         indexHtmlPath: '../erpnext_mrp/www/erpnext_mrp.html',
+			  outDir: "../erpnext_mrp/public/erpnext_mrp",
         emptyOutDir: true,
         sourcemap: true,
       },

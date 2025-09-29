@@ -11,15 +11,14 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "erpnext_mrp",
-# 		"logo": "/assets/erpnext_mrp/logo.png",
-# 		"title": "MRP Tools for ERPNext",
-# 		"route": "/erpnext_mrp",
-# 		"has_permission": "erpnext_mrp.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "MRP",
+		"logo": "/assets/erpnext_mrp/mrp-logo.png",
+		"title": "MRP Tools",
+		"route": "/erpnext_mrp"
+	}
+]
 
 # Includes in <head>
 # ------------------
