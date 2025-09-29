@@ -69,7 +69,7 @@
 import { nextTick } from "vue";
 import { AgGridVue } from "ag-grid-vue3";
 // AG Grid CSS is now imported in main.js
-import { Button, Dialog, Combobox } from 'frappe-ui'; // Import Button and Dialog components
+import { Button, Dialog, Combobox, createDocumentResource } from 'frappe-ui'; // Import Button and Dialog components
 
 export default {
   name: 'MaterialRequestList',
@@ -138,6 +138,14 @@ export default {
         pageLength: 10000,
         auto: true,
       }
+    },
+    material_request_creator() {
+      return {
+        url: 'frappe.client.insert',
+        onSuccess: () => {
+          console.log('Material Request created successfully');
+        }
+      };
     },
   },
   computed: {
@@ -352,14 +360,43 @@ export default {
         // Maybe show an error message
       }
     },
-    createMaterialRequest(items) {
-      return new Promise((resolve) => {
-        console.log('Calling dummy API to create material request with:', items);
-        // Simulate API call
-        setTimeout(() => {
-          resolve({ success: true });
-        }, 1000);
-      });
+    getDateFromWeek(weekStr) {
+      if (!weekStr) return null;
+      const [year, week] = weekStr.split('-W').map(Number);
+      
+      const d = new Date(Date.UTC(year, 0, 4)); // Start with Jan 4th, which is always in week 1
+      d.setUTCDate(d.getUTCDate() + (week - 1) * 7); // Go to the desired week
+      d.setUTCDate(d.getUTCDate() - (d.getUTCDay() || 7) + 1); // Go to Monday of that week
+
+      return d.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+    },
+    async createMaterialRequest(items) {
+      const itemsBySupplier = items.reduce((acc, item) => {
+        const supplier = item.supplier || 'No Supplier';
+        if (!acc[supplier]) {
+          acc[supplier] = [];
+        }
+        acc[supplier].push(item);
+        return acc;
+      }, {});
+
+      for (const supplierItems of Object.values(itemsBySupplier)) {
+        const materialRequestDoc = {
+          doctype: 'Material Request',
+          material_request_type: 'Purchase',
+          schedule_date: this.getDateFromWeek(supplierItems[0].week),
+          items: supplierItems.map(item => ({
+            item_code: item.item_code,
+            qty: item.quantity,
+            schedule_date: this.getDateFromWeek(item.week),
+          }))
+        };
+        if (supplierItems[0].supplier && supplierItems[0].supplier !== 'No Supplier') {
+          materialRequestDoc.supplier = supplierItems[0].supplier;
+        }
+
+        await this.$resources.material_request_creator.submit({ doc: materialRequestDoc });
+      }
     },
   }
 };
