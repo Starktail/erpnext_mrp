@@ -4,28 +4,14 @@
 frappe.listview_settings["MRP Entry"] = {
     onload: function (listview) {
         listview.page.add_inner_button(
-            __("Create master list of items"),
+            __("Run MRP Processing"),
             () => {
                 frappe.call({
-                    method: "erpnext_mrp.mrp.tasks.mrp_run.create_mrp_item_entries",
+                    method: "erpnext_mrp.mrp.tasks.mrp_run.mrp_run",
                     freeze: true,
                     args: {},
                     callback: function(r) {
-                        frappe.show_alert(__('Pre-process completed'));
-                    }
-                });
-            },
-            __("Actions")
-        );
-        listview.page.add_inner_button(
-            __("Process list of items"),
-            () => {
-                frappe.call({
-                    method: "erpnext_mrp.mrp.tasks.mrp_run.process_mrp_item_entries",
-                    freeze: true,
-                    args: {},
-                    callback: function(r) {
-                        frappe.show_alert(__('Pre-process completed'));
+                        frappe.show_alert(__('Processing completed'));
                     }
                 });
             },

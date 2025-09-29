@@ -147,23 +147,23 @@ add_to_apps_screen = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"erpnext_mrp.tasks.all"
-# 	],
-# 	"daily": [
-# 		"erpnext_mrp.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"erpnext_mrp.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"erpnext_mrp.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"erpnext_mrp.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	# "all": [
+	# 	"erpnext_mrp.tasks.all"
+	# ],
+	"daily": [
+		"erpnext_mrp.mrp.tasks.mrp_run.mrp_run"
+	],
+	# "hourly": [
+	# 	"erpnext_mrp.tasks.hourly"
+	# ],
+	# "weekly": [
+	# 	"erpnext_mrp.tasks.weekly"
+	# ],
+	# "monthly": [
+	# 	"erpnext_mrp.tasks.monthly"
+	# ],
+}
 
 # Testing
 # -------

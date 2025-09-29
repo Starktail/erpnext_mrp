@@ -9,6 +9,12 @@ from erpnext.stock.report.stock_balance.stock_balance import execute as execute_
 
 
 @frappe.whitelist()
+def mrp_run():
+    create_mrp_item_entries()
+    process_mrp_item_entries()
+
+
+@frappe.whitelist()
 def create_mrp_item_entries():
     """
     Calculate BOM levels and create MRP Entry records for each item for each week in a look-ahead period.
