@@ -1,9 +1,14 @@
 <template>
   <div class="h-full flex flex-col">
-    <div class="mb-4 flex gap-2 items-center">
-      <Button @click="clearFilters">Clear Filters</Button>
-      <Button @click="reload">Reload</Button>
-      <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
+    <div class="mb-4 flex justify-between items-center">
+      <div class="flex gap-2 items-center">
+        <Button @click="clearFilters">Clear Filters</Button>
+        <Button @click="reload">Reload</Button>
+        <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
+      </div>
+      <div>
+        <Button @click="openCreateRequestDialog" :disabled="selectedRows.length === 0">Create Material Request</Button>
+      </div>
     </div>
     <ag-grid-vue
       class="ag-theme-alpine w-full flex-grow"
@@ -20,20 +25,48 @@
       }"
       :getRowStyle="getRowStyle"
       @grid-ready="onGridReady"
+      rowSelection="multiple"
+      @selection-changed="onSelectionChanged"
     />
-    <Dialog v-model="showDialog" title="Material Request Details" @hide="showDialog = false">
-      <div>
-        <p>Dialog content will go here.</p>
-        <p>For now, this confirms the dialog is working.</p>
-      </div>
+    <Dialog v-model="showDialog" @hide="showDialog = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">Material Request Details</h3>
+      </template>
+      <template #body-content>
+        <div>
+          <p>Dialog content will go here.</p>
+          <p>For now, this confirms the dialog is working.</p>
+        </div>
+      </template>
       <template #actions>
         <Button @click="showDialog = false">Close</Button>
+      </template>
+    </Dialog>
+    <Dialog v-model="showCreateDialog" @hide="showCreateDialog = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">Create Material Request</h3>
+      </template>
+      <template #body-content>
+        <div>
+          <p>You are about to create Material Requests for the following items:</p>
+          <ul v-if="selectedItemsSummary.length > 0" class="list-disc list-inside my-4">
+            <li v-for="(item, index) in selectedItemsSummary" :key="index">
+              Item: {{ item.item_code }}, Qty: {{ item.quantity }}, Week: {{ item.week }}, Supplier: {{ item.supplier || 'N/A' }}
+            </li>
+          </ul>
+          <p v-else class="my-4">No items with suggested orders selected.</p>
+        </div>
+      </template>
+      <template #actions>
+        <Button @click="showCreateDialog = false">Cancel</Button>
+        <Button @click="confirmCreateMaterialRequest" variant="solid" :disabled="selectedItemsSummary.length === 0">Confirm</Button>
       </template>
     </Dialog>
   </div>
 </template>
 
 <script>
+import { nextTick } from "vue";
 import { AgGridVue } from "ag-grid-vue3";
 // AG Grid CSS is now imported in main.js
 import { Button, Dialog, Combobox } from 'frappe-ui'; // Import Button and Dialog components
@@ -70,6 +103,9 @@ export default {
       columnApi: null,
       showDialog: false,
       closed_column_field: 'suggested_orders',
+      selectedRows: [],
+      showCreateDialog: false,
+      selectedItemsSummary: [],
     };
   },
   resources: {
@@ -155,6 +191,7 @@ export default {
     },
     dynamicColumnDefs() {
       const staticColumns = [
+        { headerName: 'Select', checkboxSelection: true, headerCheckboxSelection: true, pinned: 'left', width: 50 },
         { field: 'item_code', headerName: 'Item Code', sortable: true, filter: true, width: 120, pinned: 'left' },
         { field: 'item_name', headerName: 'Item Name', sortable: true, filter: true, pinned: 'left' },
         { field: 'item_group', headerName: 'Item Group', sortable: true, filter: true, width: 120 },
@@ -278,7 +315,52 @@ export default {
         var weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
         // Return array of year and week number
         return [d.getUTCFullYear(), weekNo];
-    }
+    },
+    onSelectionChanged() {
+      this.selectedRows = this.gridApi.getSelectedRows();
+    },
+    async openCreateRequestDialog() {
+      const summary = [];
+      this.selectedRows.forEach(row => {
+        Object.keys(row).forEach(key => {
+          if (key.endsWith('_suggested_orders') && row[key] > 0) {
+            const week = key.split('_suggested_orders')[0];
+            summary.push({
+              item_code: row.item_code,
+              quantity: row[key],
+              week: week,
+              supplier: row.default_supplier,
+            });
+          }
+        });
+      });
+      this.selectedItemsSummary = summary;
+      
+      await nextTick();
+
+      this.showCreateDialog = true;
+    },
+    async confirmCreateMaterialRequest() {
+      try {
+        await this.createMaterialRequest(this.selectedItemsSummary);
+        console.log('Material Request created successfully for:', this.selectedItemsSummary);
+        // Maybe show a success message
+        this.showCreateDialog = false;
+        this.gridApi.deselectAll();
+      } catch (error) {
+        console.error('Failed to create Material Request:', error);
+        // Maybe show an error message
+      }
+    },
+    createMaterialRequest(items) {
+      return new Promise((resolve) => {
+        console.log('Calling dummy API to create material request with:', items);
+        // Simulate API call
+        setTimeout(() => {
+          resolve({ success: true });
+        }, 1000);
+      });
+    },
   }
 };
 </script>
