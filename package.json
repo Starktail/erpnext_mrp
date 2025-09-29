@@ -13,7 +13,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "cd frontend && yarn dev",
     "build": "cd frontend && yarn build",
-    "postinstall": "yarn install-web && yarn install-desk",
+    "postinstall": "yarn install-web",
     "install-web": "cd frontend && yarn install"
   },
   "keywords": [],
