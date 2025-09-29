@@ -14,7 +14,7 @@
       class="ag-theme-alpine w-full flex-grow"
       theme="legacy"
       :columnDefs="dynamicColumnDefs"
-      :rowData="materialRequestRows"
+      :rowData="mrpEntryRows"
       :pagination="true"
       :paginationPageSize="100"
       :getRowId="getRowId"
@@ -109,7 +109,7 @@ export default {
     };
   },
   resources: {
-    material_requests() {
+    mrp_entries() {
       return {
         type: 'list',
         doctype: 'MRP Entry',
@@ -141,12 +141,12 @@ export default {
     },
   },
   computed: {
-    materialRequestRows() {
-      if (this.$resources.material_requests.loading || !this.$resources.material_requests.data) {
+    mrpEntryRows() {
+      if (this.$resources.mrp_entries.loading || !this.$resources.mrp_entries.data) {
         return null; // AG Grid will show its loading overlay
       }
       
-      const mrpEntries = this.$resources.material_requests.data;
+      const mrpEntries = this.$resources.mrp_entries.data;
       const items = {};
 
       mrpEntries.forEach(entry => {
@@ -213,11 +213,11 @@ export default {
           filter: false,
       };
 
-      if (this.$resources.material_requests.loading || !this.$resources.material_requests.data) {
+      if (this.$resources.mrp_entries.loading || !this.$resources.mrp_entries.data) {
           return staticColumns.concat(actionsColumn);
       }
 
-      const mrpEntries = this.$resources.material_requests.data;
+      const mrpEntries = this.$resources.mrp_entries.data;
       const weeks = new Set();
       mrpEntries.forEach(entry => {
           if (!entry.target_date) return;
@@ -275,7 +275,7 @@ export default {
       ];
     },
     isLoading() {
-      return this.$resources.material_requests.loading;
+      return this.$resources.mrp_entries.loading;
     }
   },
   methods: {
@@ -287,7 +287,7 @@ export default {
       this.gridApi.setFilterModel(null);
     },
     reload() {
-      this.$resources.material_requests.reload();
+      this.$resources.mrp_entries.reload();
     },
     handleOpenDialog() { // New method to be called by the button in the cell
       this.showDialog = true;
