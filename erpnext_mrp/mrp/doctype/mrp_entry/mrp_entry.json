@@ -93,7 +93,7 @@
    "label": "Urgent"
   },
   {
-   "description": "Stock on Hand\n(Begin of period)",
+   "description": "Stock on Hand (Begin of period)",
    "fieldname": "on_hand_inventory",
    "fieldtype": "Float",
    "label": "On Hand Inventory"
@@ -219,7 +219,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-29 16:57:05.407295",
+ "modified": "2025-09-29 19:51:00.236375",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

@@ -1,0 +1,21 @@
+MRP Entry,MRP-Eintrag
+BOM Level,Stücklistenebene
+Target Date,Zieldatum
+Reorder Quantity (MOQ),Nachbestellmenge (MOQ)
+Urgent,Dringend
+On Hand Inventory,Vorhandener Bestand
+Stock on Hand (Begin of period),Lagerbestand (Beginn der Periode)
+Open Orders,Offene Bestellungen
+Upstream Sales Order Demand,Upstream-Kundenauftragsbedarf
+Total Forecast Demand,Gesamtprognosebedarf
+Forecast Demand,Prognose der Nachfrage
+Upstream Forecast Demand,Upstream-Prognosebedarf
+Scheduled Receipts,Geplante Quittungen
+Suggested Receipts,Vorgeschlagene Quittungen
+Suggested Orders,Bestellvorschläge
+Projected Stock on Hand,Prognostizierter Lagerbestand
+Periods Type,Periodentyp
+Look Ahead,Blick nach vorn
+Total Requirement based on,Gesamtbedarf basierend auf
+Forecast Date,Prognosedatum
+Forecast Quantity,Prognosemenge
