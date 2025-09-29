@@ -34,7 +34,7 @@ export default {
     forecast_data: {
       type: 'list',
       doctype: 'MRP Forecast',
-      fields: ["item_code", "forecast_quantity", "forecast_start_date"],
+      fields: ["name", "item_code", "forecast_quantity", "forecast_date"],
       orderBy: 'creation desc',
       limit: 1000, // Fetch a larger dataset to pivot
       auto: true,
@@ -53,7 +53,7 @@ export default {
         if (!pivotData[row.item_code]) {
           pivotData[row.item_code] = { item_code: row.item_code };
         }
-        const month = row.forecast_start_date.substring(0, 7); // YYYY-MM
+        const month = row.forecast_date.substring(0, 7); // YYYY-MM
         pivotData[row.item_code][month] = row.forecast_quantity;
         months.add(month);
       });
