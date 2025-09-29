@@ -650,6 +650,9 @@ def calculate_suggestions_and_projected_stock():
     # Get Re-order details
     items_reorder_details = frappe.get_all("Item Reorder", filters={"material_request_type": "Purchase"}, fields=["parent", "warehouse_reorder_level", "warehouse_reorder_qty"])
 
+    # Get default Supplier
+    item_defaults = frappe.get_all("Item Default", filters=[["Item Default", "default_supplier", "is", "set"]], fields=["parent", "default_supplier"])
+
     # Get Item Codes
     unique_items = frappe.db.sql(
         """
@@ -670,6 +673,9 @@ def calculate_suggestions_and_projected_stock():
         # Get item's re-order details
         item_reorder_details = next((detail for detail in items_reorder_details if detail.parent == item_code), None)
 
+        # Get item's default Supplier
+        item_default_supplier = next((default.default_supplier for default in item_defaults if default.parent == item_code), None)
+
         for index, entry in enumerate(mrp_entry_docs):
             # Set the starting SOH of the current entry to the projected SOH of the last entry
             if index != 0:
@@ -679,6 +685,10 @@ def calculate_suggestions_and_projected_stock():
             if item_reorder_details:
                 entry.reorder_level = item_reorder_details.warehouse_reorder_level
                 entry.reorder_quantity = item_reorder_details.warehouse_reorder_qty
+
+            # Set the default Supplier
+            if item_default_supplier:
+                entry.default_supplier = item_default_supplier
 
             # Determine if there is a shortage
             shortage = entry.on_hand_inventory - entry.open_orders - entry.total_forecast_demand + entry.scheduled_receipts - entry.reorder_level

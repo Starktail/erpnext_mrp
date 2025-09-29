@@ -86,6 +86,7 @@ export default {
           "reorder_level",
           "reorder_quantity",
           "lead_time",
+          "default_supplier",
           "is_urgent",
           "target_date",
           "on_hand_inventory",
@@ -125,6 +126,7 @@ export default {
             reorder_level: entry.reorder_level,
             reorder_quantity: entry.reorder_quantity,
             lead_time: entry.lead_time,
+            default_supplier: entry.default_supplier,
             is_urgent: entry.is_urgent,
           };
         }
@@ -160,6 +162,7 @@ export default {
         { field: 'reorder_level', headerName: 'Reorder Level', sortable: true, filter: true, width: 110 },
         { field: 'reorder_quantity', headerName: 'Re-order Quantity', sortable: true, filter: true, width: 110 },
         { field: 'lead_time', headerName: 'Lead Time', sortable: true, filter: true, width: 100 },
+        { field: 'default_supplier', headerName: 'Supplier', sortable: true, filter: true, width: 120 },        
         { field: 'is_urgent', headerName: 'Urgent', sortable: true, filter: true, width: 100 },
       ];
 

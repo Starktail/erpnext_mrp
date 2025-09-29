@@ -11,6 +11,7 @@
   "target_date",
   "item_name",
   "item_group",
+  "default_supplier",
   "uom",
   "reorder_level",
   "reorder_quantity",
@@ -207,12 +208,18 @@
    "fieldname": "total_forecast_demand",
    "fieldtype": "Float",
    "label": "Total Forecast Demand"
+  },
+  {
+   "fieldname": "default_supplier",
+   "fieldtype": "Link",
+   "label": "Default Supplier",
+   "options": "Supplier"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-25 22:44:43.575647",
+ "modified": "2025-09-29 16:57:05.407295",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
