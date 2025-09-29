@@ -142,6 +142,11 @@ def update_open_orders_demand():
 
 
 def update_forecast_demand():
+    _update_forecast_demand()
+    _update_upstream_forecast_demand()
+
+
+def _update_forecast_demand():
     """
     Calculates forecast quantities for each item and week, then bulk updates MRP Entry.
     """
@@ -187,6 +192,76 @@ def update_forecast_demand():
             ELSE forecast_demand
         END
         WHERE name IN ({names_str})
+    """
+    frappe.db.sql(update_query)
+
+
+def _update_upstream_forecast_demand():
+    """
+    Explodes forecast demand from parent items down to their components using a recursive CTE.
+    """
+    sql_query = f"""
+        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty) AS (
+            -- Anchor: Initial demand from MRP entries with forecast_demand
+            SELECT
+                item_code,
+                target_date,
+                forecast_demand
+            FROM `tabMRP Entry`
+            WHERE forecast_demand > 0
+
+            UNION ALL
+
+            -- Recursive Step: Explode demand to child components
+            SELECT
+                bom_item.item_code,
+                de.target_date,
+                de.required_qty * bom_item.stock_qty
+            FROM DemandExplosion AS de
+            JOIN `tabBOM` AS bom ON de.item_code = bom.item
+            JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
+            WHERE bom.is_active = 1 AND bom.is_default = 1
+        ),
+        AggregatedDemand AS (
+            -- Aggregate demand for each component by week
+            SELECT
+                item_code,
+                DATE_FORMAT(target_date, '%YCW%v') AS calendar_week,
+                SUM(required_qty) AS total_demand
+            FROM DemandExplosion
+            GROUP BY item_code, calendar_week
+        )
+        -- Select the final aggregated demand
+        SELECT * FROM AggregatedDemand;
+    """
+
+    upstream_demand_data = frappe.db.sql(sql_query, as_dict=True)
+
+    if not upstream_demand_data:
+        return
+
+    update_cases = []
+    mrp_entry_names = []
+    for row in upstream_demand_data:
+        mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(
+            f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(upstream_forecast_demand, 0) + {row.total_demand}"
+        )
+
+    if not mrp_entry_names:
+        return
+
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
+
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET upstream_forecast_demand = CASE
+            {case_str}
+            ELSE upstream_forecast_demand
+        END
+        WHERE name IN ({names_str});
     """
     frappe.db.sql(update_query)
 
