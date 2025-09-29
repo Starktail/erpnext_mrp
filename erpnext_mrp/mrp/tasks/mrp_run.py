@@ -129,15 +129,67 @@ def process_mrp_item_entries():
     Main background task to process all MRP calculations for each item and period.
     """
     update_open_orders_demand()
-    #TODO: update_forecast_demand()
+    update_forecast_demand()
     update_scheduled_receipts()
     calculate_totals()
     calculate_suggestions_and_projected_stock()
+
 
 def update_open_orders_demand():
     _update_reserved_qty()
     _update_reserved_qty_for_production()
     _update_upstream_so_demand()
+
+
+def update_forecast_demand():
+    """
+    Calculates forecast quantities for each item and week, then bulk updates MRP Entry.
+    """
+    settings = frappe.get_cached_doc("MRP Settings")
+    look_ahead = settings.look_ahead or 6
+    start_date = datetime.date.today()
+    end_date = start_date + datetime.timedelta(weeks=look_ahead)
+
+    sql_query = f"""
+        SELECT
+            item_code,
+            DATE_FORMAT(forecast_date, '%%YCW%%v') AS calendar_week,
+            SUM(forecast_quantity) AS total_forecast_quantity
+        FROM `tabMRP Forecast`
+        WHERE forecast_date BETWEEN %(start_date)s AND %(end_date)s
+        GROUP BY item_code, calendar_week;
+    """
+    forecast_data = frappe.db.sql(
+        sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+    )
+
+    if not forecast_data:
+        return
+
+    # Use a CASE statement for efficient bulk updates
+    update_cases = []
+    mrp_entry_names = []
+    for row in forecast_data:
+        mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
+        mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
+        update_cases.append(f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN {row.total_forecast_quantity}")
+
+    if not mrp_entry_names:
+        return
+
+    case_str = " ".join(update_cases)
+    names_str = ", ".join(mrp_entry_names)
+
+    update_query = f"""
+        UPDATE `tabMRP Entry`
+        SET forecast_demand = CASE
+            {case_str}
+            ELSE forecast_demand
+        END
+        WHERE name IN ({names_str})
+    """
+    frappe.db.sql(update_query)
+
 
 def update_scheduled_receipts():
     _update_planned_qty()
