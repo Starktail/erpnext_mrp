@@ -62,6 +62,24 @@
         <Button @click="confirmCreateMaterialRequest" variant="solid" :disabled="selectedItemsSummary.length === 0">Confirm</Button>
       </template>
     </Dialog>
+    <Dialog v-model="showSuccessDialog" @hide="showSuccessDialog = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">Material Requests Created</h3>
+      </template>
+      <template #body-content>
+        <div>
+          <p>The following Material Requests have been created successfully:</p>
+          <ul v-if="newlyCreatedDocs.length" class="list-disc list-inside my-4">
+            <li v-for="doc in newlyCreatedDocs" :key="doc.name">
+              <a :href="`/app/material-request/${doc.name}`" target="_blank" class="text-blue-600 hover:underline">{{ doc.name }}</a>
+            </li>
+          </ul>
+        </div>
+      </template>
+      <template #actions>
+        <Button @click="showSuccessDialog = false">Close</Button>
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -106,6 +124,8 @@ export default {
       selectedRows: [],
       showCreateDialog: false,
       selectedItemsSummary: [],
+      showSuccessDialog: false,
+      newlyCreatedDocs: [],
     };
   },
   resources: {
@@ -350,9 +370,9 @@ export default {
     },
     async confirmCreateMaterialRequest() {
       try {
-        await this.createMaterialRequest(this.selectedItemsSummary);
-        console.log('Material Request created successfully for:', this.selectedItemsSummary);
-        // Maybe show a success message
+        const createdDocs = await this.createMaterialRequest(this.selectedItemsSummary);
+        this.newlyCreatedDocs = createdDocs;
+        this.showSuccessDialog = true;
         this.showCreateDialog = false;
         this.gridApi.deselectAll();
       } catch (error) {
@@ -380,6 +400,7 @@ export default {
         return acc;
       }, {});
 
+      const createdDocs = [];
       for (const supplierItems of Object.values(itemsBySupplier)) {
         const materialRequestDoc = {
           doctype: 'Material Request',
@@ -395,8 +416,12 @@ export default {
           materialRequestDoc.supplier = supplierItems[0].supplier;
         }
 
-        await this.$resources.material_request_creator.submit({ doc: materialRequestDoc });
+        const newDoc = await this.$resources.material_request_creator.submit({ doc: materialRequestDoc });
+        if (newDoc) {
+          createdDocs.push(newDoc);
+        }
       }
+      return createdDocs;
     },
   }
 };
