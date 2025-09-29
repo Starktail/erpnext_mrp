@@ -201,12 +201,13 @@ def _update_upstream_forecast_demand():
     Explodes forecast demand from parent items down to their components using a recursive CTE.
     """
     sql_query = f"""
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty) AS (
+        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level) AS (
             -- Anchor: Initial demand from MRP entries with forecast_demand
             SELECT
                 item_code,
                 target_date,
-                forecast_demand
+                forecast_demand,
+                0 as level
             FROM `tabMRP Entry`
             WHERE forecast_demand > 0
 
@@ -216,7 +217,8 @@ def _update_upstream_forecast_demand():
             SELECT
                 bom_item.item_code,
                 de.target_date,
-                de.required_qty * bom_item.stock_qty
+                de.required_qty * bom_item.stock_qty,
+                de.level + 1
             FROM DemandExplosion AS de
             JOIN `tabBOM` AS bom ON de.item_code = bom.item
             JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
@@ -229,6 +231,7 @@ def _update_upstream_forecast_demand():
                 DATE_FORMAT(target_date, '%YCW%v') AS calendar_week,
                 SUM(required_qty) AS total_demand
             FROM DemandExplosion
+            WHERE level > 0
             GROUP BY item_code, calendar_week
         )
         -- Select the final aggregated demand
@@ -437,12 +440,13 @@ def _update_upstream_so_demand():
     Explodes open orders demand from parent items down to their components using a recursive CTE.
     """
     sql_query = f"""
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty) AS (
+        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level) AS (
             -- Anchor: Initial demand from MRP entries with open_orders
             SELECT
                 item_code,
                 target_date,
-                open_orders
+                open_orders,
+                0 as level
             FROM `tabMRP Entry`
             WHERE open_orders > 0
 
@@ -452,7 +456,8 @@ def _update_upstream_so_demand():
             SELECT
                 bom_item.item_code,
                 de.target_date,
-                de.required_qty * bom_item.stock_qty
+                de.required_qty * bom_item.stock_qty,
+                de.level + 1
             FROM DemandExplosion AS de
             JOIN `tabBOM` AS bom ON de.item_code = bom.item
             JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
@@ -465,6 +470,7 @@ def _update_upstream_so_demand():
                 DATE_FORMAT(target_date, '%YCW%v') AS calendar_week,
                 SUM(required_qty) AS total_demand
             FROM DemandExplosion
+            WHERE level > 0
             GROUP BY item_code, calendar_week
         )
         -- Select the final aggregated demand
