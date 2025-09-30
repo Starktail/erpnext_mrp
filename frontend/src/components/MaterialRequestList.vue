@@ -155,8 +155,13 @@ export default {
         ],
         orderBy: 'creation desc',
         start: 0,
-        pageLength: 10000,
+        pageLength: 500,
         auto: true,
+        onSuccess() {
+          if (this.$resources.mrp_entries.hasNextPage) {
+            this.$resources.mrp_entries.next();
+          }
+        },
       }
     },
     material_request_creator() {
