@@ -9,12 +9,11 @@ from erpnext.stock.report.stock_balance.stock_balance import execute as execute_
 
 
 @frappe.whitelist()
-def mrp_run():
+def mrp_run(enqueue: bool = True):
     create_mrp_item_entries()
-    process_mrp_item_entries()
+    process_mrp_item_entries(enqueue=enqueue)
 
 
-@frappe.whitelist()
 def create_mrp_item_entries():
     """
     Calculate BOM levels and create MRP Entry records for each item for each week in a look-ahead period.
@@ -129,8 +128,7 @@ def create_mrp_item_entries():
     )
 
 
-@frappe.whitelist()
-def process_mrp_item_entries():
+def process_mrp_item_entries(enqueue: bool):
     """
     Main background task to process all MRP calculations for each item and period.
     """
@@ -138,7 +136,7 @@ def process_mrp_item_entries():
     update_forecast_demand()
     update_scheduled_receipts()
     calculate_totals()
-    calculate_suggestions_and_projected_stock()
+    calculate_suggestions_and_projected_stock(enqueue=enqueue)
 
 
 def update_open_orders_demand():
@@ -642,69 +640,108 @@ def calculate_totals():
     """
     frappe.db.sql(update_query)
 
-def calculate_suggestions_and_projected_stock():
-
+def calculate_suggestions_and_projected_stock(enqueue: bool):
     # Get stock levels
-    filters = frappe._dict({
-        "from_date": datetime.date.today(),
-        "to_date": datetime.date.today()
-    })
+    filters = frappe._dict({"from_date": datetime.date.today(), "to_date": datetime.date.today()})
     stock_level_report = execute_stock_balance_report(filters=filters)
-    # First row cotains headers, second row contains data
+    # First row contains headers, second row contains data
     stock_levels = stock_level_report[1]
 
-    # Get Re-order details
-    items_reorder_details = frappe.get_all("Item Reorder", filters={"material_request_type": "Purchase"}, fields=["parent", "warehouse_reorder_level", "warehouse_reorder_qty"])
+    # Get item details in a single query
+    item_details_query = """
+        SELECT DISTINCT
+            mrp.item_code,
+            ir.warehouse_reorder_level,
+            ir.warehouse_reorder_qty,
+            id.default_supplier
+        FROM `tabMRP Entry` AS mrp
+        LEFT JOIN `tabItem Reorder` AS ir
+            ON mrp.item_code = ir.parent AND ir.material_request_type = 'Purchase' AND ir.idx = 1
+        LEFT JOIN `tabItem Default` AS id
+            ON mrp.item_code = id.parent AND id.default_supplier IS NOT NULL
+    """
+    item_details_list = frappe.db.sql(item_details_query, as_dict=True)
 
-    # Get default Supplier
-    item_defaults = frappe.get_all("Item Default", filters=[["Item Default", "default_supplier", "is", "set"]], fields=["parent", "default_supplier"])
+    # Process items in batches
+    batch_size = 1000
+    for i in range(0, len(item_details_list), batch_size):
+        batch = item_details_list[i : i + batch_size]
+        if enqueue:
+            frappe.enqueue(
+                "erpnext_mrp.mrp.tasks.mrp_run.process_item_batch",
+                queue="long",
+                item_batch=batch,
+                stock_levels=stock_levels,
+            )
+        else:
+            process_item_batch(item_batch=batch, stock_levels=stock_levels)
 
-    # Get Item Codes
-    unique_items = frappe.db.sql(
-        """
-        SELECT DISTINCT item_code
-        FROM `tabMRP Entry`
-        """
-    , pluck=True)
-    for item_code in unique_items:
-        # Get MRP Entries for single item ranging over next few periods
-        mrp_entries = frappe.get_all("MRP Entry", filters={"item_code": item_code}, order_by="target_date asc")
-        mrp_entry_docs = [
-            frappe.get_doc("MRP Entry", entry.name) for entry in mrp_entries
-        ]
+
+def process_item_batch(item_batch, stock_levels):
+    item_codes = [item["item_code"] for item in item_batch]
+
+    # Get all MRP entries for the batch of items with all fields needed for processing
+    mrp_entries_dicts = frappe.get_all(
+        "MRP Entry",
+        filters={"item_code": ("in", item_codes)},
+        fields=["*"],  # get all fields
+        order_by="item_code, target_date asc",
+    )
+
+    # Group MRP entries by item_code
+    grouped_mrp_entries = {}
+    for entry_dict in mrp_entries_dicts:
+        item_code = entry_dict.item_code
+        if item_code not in grouped_mrp_entries:
+            grouped_mrp_entries[item_code] = []
+        grouped_mrp_entries[item_code].append(entry_dict)
+
+    item_details_map = {item["item_code"]: item for item in item_batch}
+
+    for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
+        mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
+        item_details = item_details_map.get(item_code)
 
         # Set current stock level as starting stock on hand
-        mrp_entry_docs[0].on_hand_inventory = sum([stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code])
-
-        # Get item's re-order details
-        item_reorder_details = next((detail for detail in items_reorder_details if detail.parent == item_code), None)
-
-        # Get item's default Supplier
-        item_default_supplier = next((default.default_supplier for default in item_defaults if default.parent == item_code), None)
+        mrp_entry_docs[0].on_hand_inventory = sum(
+            [stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code]
+        )
 
         for index, entry in enumerate(mrp_entry_docs):
             # Set the starting SOH of the current entry to the projected SOH of the last entry
             if index != 0:
-                entry.on_hand_inventory = mrp_entry_docs[index-1].projected_on_hand_inventory
+                entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
 
             # Set the re-order details
-            if item_reorder_details:
-                entry.reorder_level = item_reorder_details.warehouse_reorder_level
-                entry.reorder_quantity = item_reorder_details.warehouse_reorder_qty
+            if item_details:
+                entry.reorder_level = item_details.get("warehouse_reorder_level")
+                entry.reorder_quantity = item_details.get("warehouse_reorder_qty")
 
             # Set the default Supplier
-            if item_default_supplier:
-                entry.default_supplier = item_default_supplier
+            if item_details:
+                entry.default_supplier = item_details.get("default_supplier")
 
             # Determine if there is a shortage
-            shortage = entry.on_hand_inventory - entry.open_orders - entry.total_forecast_demand + entry.scheduled_receipts - entry.reorder_level
+            shortage = (
+                (entry.on_hand_inventory or 0)
+                - (entry.open_orders or 0)
+                - (entry.total_forecast_demand or 0)
+                + (entry.scheduled_receipts or 0)
+                - (entry.reorder_level or 0)
+            )
             if shortage < 0:
                 shortage *= -1
                 moq = entry.reorder_quantity or 1
                 entry.suggested_receipts = math.ceil(shortage / moq) * moq
-            
-            entry.projected_on_hand_inventory = entry.on_hand_inventory - entry.open_orders - entry.total_forecast_demand + entry.scheduled_receipts + entry.suggested_receipts
-            
+
+            entry.projected_on_hand_inventory = (
+                (entry.on_hand_inventory or 0)
+                - (entry.open_orders or 0)
+                - (entry.total_forecast_demand or 0)
+                + (entry.scheduled_receipts or 0)
+                + (entry.suggested_receipts or 0)
+            )
+
         # Based on lead time, set the suggested order qty for the correct earlier entry
         is_urgent = 0
         for index, entry in reversed(list(enumerate(mrp_entry_docs))):
@@ -713,9 +750,13 @@ def calculate_suggestions_and_projected_stock():
                 # If we should have ordered already, flag this entry
                 if index - weeks_before < 0:
                     is_urgent = 1
-                    mrp_entry_docs[0].suggested_orders += entry.suggested_receipts
+                    mrp_entry_docs[0].suggested_orders = (
+                        mrp_entry_docs[0].suggested_orders or 0
+                    ) + entry.suggested_receipts
                 else:
-                    mrp_entry_docs[index - weeks_before].suggested_orders += entry.suggested_receipts
+                    mrp_entry_docs[index - weeks_before].suggested_orders = (
+                        mrp_entry_docs[index - weeks_before].suggested_orders or 0
+                    ) + entry.suggested_receipts
 
             entry.is_urgent = is_urgent
             entry.save()

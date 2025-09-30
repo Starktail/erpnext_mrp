@@ -9,7 +9,9 @@ frappe.listview_settings["MRP Entry"] = {
                 frappe.call({
                     method: "erpnext_mrp.mrp.tasks.mrp_run.mrp_run",
                     freeze: true,
-                    args: {},
+                    args: {
+                        "enqueue": false
+                    },
                     callback: function(r) {
                         frappe.show_alert(__('Processing completed'));
                     }
