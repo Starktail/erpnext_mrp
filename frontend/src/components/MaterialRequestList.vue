@@ -239,7 +239,8 @@ export default {
           headerName: 'Urgent', 
           sortable: true, 
           filter: true, 
-          width: 100, 
+          width: 120,
+          cellStyle: { textAlign: 'center' }, 
           sort: 'desc',
           cellRenderer: params => {
             return params.value === 1 ? '⚠️' : '';
