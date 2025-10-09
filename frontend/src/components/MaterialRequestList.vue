@@ -4,6 +4,7 @@
       <div class="flex gap-2 items-center">
         <Button @click="clearFilters">Clear Filters</Button>
         <Button @click="reload">Reload</Button>
+        <Button @click="exportToCsv">Export to CSV</Button>
         <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
       </div>
       <div>
@@ -312,6 +313,9 @@ export default {
     }
   },
   methods: {
+    exportToCsv() {
+      this.gridApi.exportDataAsCsv({ allColumns: true });
+    },
     onGridReady(params) {
       this.gridApi = params.api;
       this.columnApi = params.columnApi;
