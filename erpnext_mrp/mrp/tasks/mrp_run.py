@@ -115,14 +115,16 @@ def create_mrp_item_entries():
     # 4. Efficiently combine items and periods and prepare for bulk insert
     # item is a tuple: (item_code, bom_level)
     # period is a tuple: (period_str, target_date)
+    owner = frappe.session.user
+    creation = datetime.datetime.now()
     final_values = [
-        (f"{item[0]}{period[0]}", item[0], item[1], item[2], period[1])
+        (f"{item[0]}{period[0]}", item[0], item[1], item[2], period[1], owner, creation)
         for item, period in itertools.product(item_list, period_data)
     ]
     # 5. Perform a bulk insert of all generated records
     frappe.db.bulk_insert(
         "MRP Entry",
-        fields=["name", "item_code", "lead_time", "bom_level", "target_date"],
+        fields=["name", "item_code", "lead_time", "bom_level", "target_date", "owner", "creation"],
         values=final_values,
         ignore_duplicates=True,
     )
