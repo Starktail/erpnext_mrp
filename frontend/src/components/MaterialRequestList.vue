@@ -234,7 +234,7 @@ export default {
         { field: 'reorder_quantity', headerName: 'Re-order Quantity', sortable: true, filter: true, width: 110 },
         { field: 'lead_time', headerName: 'Lead Time', sortable: true, filter: true, width: 100 },
         { field: 'default_supplier', headerName: 'Supplier', sortable: true, filter: true, width: 120 },        
-        { field: 'is_urgent', headerName: 'Urgent', sortable: true, filter: true, width: 100 },
+        { field: 'is_urgent', headerName: 'Urgent', sortable: true, filter: true, width: 100, sort: 'desc' },
       ];
 
       const actionsColumn = {
