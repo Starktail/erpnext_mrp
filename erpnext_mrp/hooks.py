@@ -16,7 +16,8 @@ add_to_apps_screen = [
 		"name": "MRP",
 		"logo": "/assets/erpnext_mrp/mrp-logo.png",
 		"title": "MRP Tools",
-		"route": "/erpnext_mrp"
+		"route": "/erpnext_mrp",
+        "has_permission": "erpnext_mrp.api.check_app_permission"
 	}
 ]
 
