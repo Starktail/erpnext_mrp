@@ -5,9 +5,14 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "calculation_settings_section",
   "periods_type",
   "look_ahead",
-  "requirement_based_on"
+  "requirement_based_on",
+  "advanced_settings_section",
+  "item_condition",
+  "column_break_bdmb",
+  "html_rsvb"
  ],
  "fields": [
   {
@@ -35,13 +40,39 @@
    "label": "Total Requirement based on",
    "options": "Forecast only\nOpen Orders only\nOpen Orders + Forecast\nOpen Orders + Forecast (orders consume the forecast)",
    "reqd": 1
+  },
+  {
+   "description": "Optional: If set, only items with this condition will be taken into account when running MRP calculations",
+   "fieldname": "item_condition",
+   "fieldtype": "Code",
+   "ignore_xss_filter": 1,
+   "label": "Item Condition"
+  },
+  {
+   "fieldname": "calculation_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Calculation Settings"
+  },
+  {
+   "fieldname": "advanced_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Advanced Settings"
+  },
+  {
+   "fieldname": "column_break_bdmb",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "html_rsvb",
+   "fieldtype": "HTML",
+   "options": "<p><strong>Condition Examples:</strong></p>\n<pre>doc.default_material_request_type == \"Purchase\"<br>doc.end_of_life &gt;= nowdate()<br>doc.lead_time_days &gt; 7\n</pre>\n"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-10-09 17:13:00.933570",
+ "modified": "2025-10-09 18:13:06.102804",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

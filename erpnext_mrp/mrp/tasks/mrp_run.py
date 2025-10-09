@@ -7,6 +7,8 @@ from frappe import _
 
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 
+from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
+
 
 @frappe.whitelist()
 def mrp_run(enqueue: bool = True):
@@ -95,6 +97,20 @@ def create_mrp_item_entries():
 
     # 3. Generate weekly periods for the look-ahead horizon
     settings = frappe.get_cached_doc("MRP Settings")
+
+    # Filter out items if a condition is set
+    if settings.item_condition:
+        item_codes = [item[0] for item in item_list]
+        item_docs = frappe.get_all("Item", filters={"name": ("in", item_codes)}, fields=["*"])
+
+        valid_item_codes = set()
+        for item_doc in item_docs:
+            context = get_context(item_doc)
+            if frappe.safe_eval(settings.item_condition, None, context):
+                valid_item_codes.add(item_doc.name)
+
+        item_list = [item for item in item_list if item[0] in valid_item_codes]
+
     if settings.periods_type != "Calendar Week":
         raise ValueError(_("Only 'Calendar Week' is a supported period type"))
     look_ahead = settings.look_ahead or 6
