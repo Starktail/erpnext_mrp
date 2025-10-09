@@ -162,10 +162,13 @@ def _update_forecast_demand():
     sql_query = f"""
         SELECT
             item_code,
-            DATE_FORMAT(forecast_date, '%%YCW%%v') AS calendar_week,
+            CASE
+                WHEN forecast_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
+                ELSE DATE_FORMAT(forecast_date, '%%YCW%%v')
+            END AS calendar_week,
             SUM(forecast_quantity) AS total_forecast_quantity
         FROM `tabMRP Forecast`
-        WHERE forecast_date BETWEEN %(start_date)s AND %(end_date)s
+        WHERE forecast_date <= %(end_date)s
         GROUP BY item_code, calendar_week;
     """
     forecast_data = frappe.db.sql(
@@ -297,7 +300,10 @@ def _update_reserved_qty():
     sql_query = f"""
         SELECT
             item_code,
-            DATE_FORMAT(delivery_date, '%%YCW%%v') AS calendar_week,
+            CASE
+                WHEN delivery_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
+                ELSE DATE_FORMAT(delivery_date, '%%YCW%%v')
+            END AS calendar_week,
             SUM(reserved_qty) AS total_reserved_qty
         FROM (
             SELECT
@@ -344,7 +350,7 @@ def _update_reserved_qty():
             ) AS combined_so_items
             WHERE so_item_qty >= so_item_delivered_qty
         ) AS final_so_data
-        WHERE delivery_date BETWEEN %(start_date)s AND %(end_date)s
+        WHERE delivery_date <= %(end_date)s
         GROUP BY item_code, calendar_week;
     """
     open_orders_data = frappe.db.sql(
@@ -394,13 +400,16 @@ def _update_reserved_qty_for_production():
     sql_query = f"""
         SELECT
             wo_item.item_code,
-            DATE_FORMAT(wo.planned_start_date, '%%YCW%%v') AS calendar_week,
+            CASE
+                WHEN wo.planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
+                ELSE DATE_FORMAT(wo.planned_start_date, '%%YCW%%v')
+            END AS calendar_week,
             SUM(wo_item.required_qty - wo_item.transferred_qty) AS total_required_qty
         FROM `tabWork Order Item` AS wo_item
         JOIN `tabWork Order` AS wo ON wo_item.parent = wo.name
         WHERE wo.docstatus = 1
             AND wo.status NOT IN ('Completed', 'Stopped', 'Closed', 'Cancelled')
-            AND wo.planned_start_date BETWEEN %(start_date)s AND %(end_date)s
+            AND wo.planned_start_date <= %(end_date)s
             AND (wo_item.required_qty > wo_item.transferred_qty)
         GROUP BY
             wo_item.item_code,
@@ -525,14 +534,17 @@ def _update_planned_qty():
     sql_query = f"""
         SELECT
             production_item,
-            DATE_FORMAT(planned_start_date, '%%YCW%%v') AS calendar_week,
+            CASE
+                WHEN planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
+                ELSE DATE_FORMAT(planned_start_date, '%%YCW%%v')
+            END AS calendar_week,
             SUM(qty - produced_qty) AS total_planned_qty
         FROM `tabWork Order`
         WHERE
             status NOT IN ('Stopped', 'Completed', 'Closed', 'Cancelled')
             AND docstatus = 1
             AND qty > produced_qty
-            AND planned_start_date BETWEEN %(start_date)s AND %(end_date)s
+            AND planned_start_date <= %(end_date)s
         GROUP BY
             production_item,
             calendar_week;
@@ -584,7 +596,10 @@ def _update_ordered_qty():
     sql_query = f"""
         SELECT
             po_item.item_code,
-            DATE_FORMAT(po_item.schedule_date, '%%YCW%%v') AS calendar_week,
+            CASE
+                WHEN po_item.schedule_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
+                ELSE DATE_FORMAT(po_item.schedule_date, '%%YCW%%v')
+            END AS calendar_week,
             SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty
         FROM `tabPurchase Order Item` AS po_item
         JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
@@ -593,7 +608,7 @@ def _update_ordered_qty():
             AND po.status NOT IN ('Closed', 'Delivered', 'Cancelled')
             AND po.docstatus = 1
             AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
-            AND po_item.schedule_date BETWEEN %(start_date)s AND %(end_date)s
+            AND po_item.schedule_date <= %(end_date)s
         GROUP BY
             po_item.item_code,
             calendar_week;
