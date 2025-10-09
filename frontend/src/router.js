@@ -14,7 +14,7 @@ const routes = [
 ]
 
 let router = createRouter({
-  history: createWebHistory('/mrp'),
+  history: createWebHistory('/erpnext_mrp'),
   routes,
 })
 
