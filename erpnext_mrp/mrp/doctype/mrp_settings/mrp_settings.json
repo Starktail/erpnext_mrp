@@ -6,7 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "periods_type",
-  "look_ahead"
+  "look_ahead",
+  "requirement_based_on"
  ],
  "fields": [
   {
@@ -26,13 +27,21 @@
    "in_list_view": 1,
    "label": "Look Ahead",
    "reqd": 1
+  },
+  {
+   "default": "Open Orders + Forecast",
+   "fieldname": "requirement_based_on",
+   "fieldtype": "Select",
+   "label": "Total Requirement based on",
+   "options": "Forecast only\nOpen Orders only\nOpen Orders + Forecast\nOpen Orders + Forecast (orders consume the forecast)",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-09-25 19:35:05.587392",
+ "modified": "2025-10-09 17:13:00.933570",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

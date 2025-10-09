@@ -662,6 +662,9 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
     """
     item_details_list = frappe.db.sql(item_details_query, as_dict=True)
 
+    settings = frappe.get_cached_doc("MRP Settings")
+    requirement_based_on = settings.requirement_based_on
+
     # Process items in batches
     batch_size = 1000
     for i in range(0, len(item_details_list), batch_size):
@@ -672,12 +675,15 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
                 queue="long",
                 item_batch=batch,
                 stock_levels=stock_levels,
+                requirement_based_on=requirement_based_on,
             )
         else:
-            process_item_batch(item_batch=batch, stock_levels=stock_levels)
+            process_item_batch(
+                item_batch=batch, stock_levels=stock_levels, requirement_based_on=requirement_based_on
+            )
 
 
-def process_item_batch(item_batch, stock_levels):
+def process_item_batch(item_batch, stock_levels, requirement_based_on):
     item_codes = [item["item_code"] for item in item_batch]
 
     # Get all MRP entries for the batch of items with all fields needed for processing
@@ -721,11 +727,27 @@ def process_item_batch(item_batch, stock_levels):
             if item_details:
                 entry.default_supplier = item_details.get("default_supplier")
 
+            # Determine demand based on MRP settings
+            open_orders = entry.open_orders or 0
+            total_forecast_demand = entry.total_forecast_demand or 0
+
+            if requirement_based_on == "Forecast only":
+                demand = total_forecast_demand
+            elif requirement_based_on == "Open Orders only":
+                demand = open_orders
+            elif requirement_based_on == "Open Orders + Forecast":
+                demand = open_orders + total_forecast_demand
+            elif requirement_based_on == "Open Orders + Forecast (orders consume the forecast)":
+                demand = open_orders + max(0, total_forecast_demand - open_orders)
+            else:
+                # Default to Open Orders + Forecast
+                raise ValueError(_("Unkown 'Requirement based on' setting"))
+
             # Determine if there is a shortage
+            entry.suggested_receipts = 0
             shortage = (
                 (entry.on_hand_inventory or 0)
-                - (entry.open_orders or 0)
-                - (entry.total_forecast_demand or 0)
+                - demand
                 + (entry.scheduled_receipts or 0)
                 - (entry.reorder_level or 0)
             )
@@ -736,8 +758,7 @@ def process_item_batch(item_batch, stock_levels):
 
             entry.projected_on_hand_inventory = (
                 (entry.on_hand_inventory or 0)
-                - (entry.open_orders or 0)
-                - (entry.total_forecast_demand or 0)
+                - demand
                 + (entry.scheduled_receipts or 0)
                 + (entry.suggested_receipts or 0)
             )
