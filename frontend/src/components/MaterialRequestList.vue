@@ -7,7 +7,16 @@
         <Button @click="exportToCsv">Export to CSV</Button>
         <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
       </div>
-      <div>
+      <!-- Colour Legend -->
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #ffdddd;"></div>
+          <span class="text-gray-600">Urgent Item</span>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #ddeeff;"></div>
+          <span class="text-gray-600">Suggested Order</span>
+        </div>
         <Button @click="openCreateRequestDialog" :disabled="selectedRows.length === 0">Create Material Request</Button>
       </div>
     </div>
