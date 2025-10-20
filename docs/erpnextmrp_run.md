@@ -1,0 +1,75 @@
+# MRP Calculations
+
+The core of the MRP Tools is a background process that calculates the material plan. This process runs asynchronously and populates the `MRP Entry` table, which serves as the data source for the MRP Workbench. The calculation is designed to be idempotent, meaning it clears all previous data before generating the new plan to ensure accuracy.
+
+### 1. MRP Settings
+
+![MRP Settings](images/mrp_settings.png)
+
+The calculation is executed in several distinct stages:
+
+### 2. Item and Period Scaffolding
+
+First, the system creates a planning scaffold for all relevant items over the defined time horizon.
+
+- **BOM Level Calculation**: The process starts by calculating the Bill of Materials (BOM) level for every stock item. It uses a recursive SQL query to determine the deepest level an item appears in any default, active BOM. Top-level items are at level 0.
+- **Time Horizon Generation**: Based on the "Look Ahead" setting in `MRP Settings`, the system generates a series of weekly periods (e.g., `2026-W40`, `2026-W41`, etc.).
+- **MRP Entry Creation**: An `MRP Entry` record is created for each item for each week in the look-ahead period. This creates the grid of data that will be populated in the subsequent steps.
+
+### 3. Demand Calculation
+
+Next, the system calculates all sources of demand.
+
+- **Open Orders Demand**:
+    - **Reserved Qty**: Calculates demand from open Sales Orders.
+    - **Reserved Qty for Production**: Calculates demand for raw materials from open Work Orders.
+    - **Upstream Sales Order Demand**: Explodes the demand from Sales Orders down through the BOMs to calculate requirements for sub-assemblies and components.
+- **Forecast Demand**:
+    - **Forecast Demand**: Calculates demand from the `MRP Forecast` doctype for top-level items.
+    - **Upstream Forecast Demand**: Explodes the forecast demand down through the BOMs to calculate requirements for sub-assemblies and components.
+
+### 4. Scheduled Receipts Calculation
+
+The system then calculates all sources of future supply.
+
+- **Planned Qty**: Calculates scheduled receipts from open Work Orders for manufactured items.
+- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items.
+
+### 5. Totals and Projections
+
+Finally, the system calculates the net position and suggests actions.
+
+- **Totals Calculation**: The various demand and supply fields are summed into total fields like `Open Orders`, `Total Forecast Demand`, and `Scheduled Receipts`.
+- **Suggestions and Projected Stock**: This is the core MRP logic. For each item, the calculation proceeds chronologically, week by week:
+    1.  **Beginning Inventory**: The `On Hand Inventory` for the first period is the current actual stock level. For all subsequent periods, it is the `Projected On Hand Inventory` from the previous period.
+    2.  **Net Requirements**: The system calculates the total demand for the period based on the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
+    3.  **Shortage Calculation**: It determines if there is a shortage by comparing the on-hand inventory and scheduled receipts against the total demand and the item's re-order level.
+    4.  **Suggested Receipts**: If a shortage exists, the system calculates a `Suggested Receipt`. This value considers the shortage quantity and the item's re-order quantity (MOQ).
+    5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
+    6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
+    7.  **Urgency Flag**: If a suggested order is calculated for a period that is already in the past, the item is flagged as `Urgent`.
+
+## MRP Entry Fields
+
+The following are the key fields calculated for each item in each period:
+
+| Field                           | Description                                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Item Details**                |                                                                                                                                                                       |
+| `item_code`                     | The item being planned.                                                                                                                                               |
+| `bom_level`                     | The calculated BOM level of the item.                                                                                                                                 |
+| `target_date`                   | The target date for the planning period (week).                                                                                                                       |
+| `reorder_level`                 | The minimum stock level for the item.                                                                                                                                 |
+| `reorder_quantity`              | The minimum order quantity (MOQ) for the item.                                                                                                                        |
+| `lead_time`                     | The lead time (in days) for procuring or manufacturing the item.                                                                                                      |
+| `is_urgent`                     | A flag indicating if an order for this item is past its required start date.                                                                                          |
+| **Inventory & Demand**          |                                                                                                                                                                       |
+| `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
+| `open_orders`                   | Total demand from firm orders (Sales Orders and Work Orders).                                                                                                         |
+| `total_forecast_demand`         | Total demand from forecasts, including exploded demand for components.                                                                                                |
+| **Supply**                      |                                                                                                                                                                       |
+| `scheduled_receipts`            | Total expected supply from open Work Orders and Purchase Orders.                                                                                                      |
+| **Calculations & Projections**  |                                                                                                                                                                       |
+| `suggested_receipts`            | The quantity the MRP calculation suggests should be received in this period to avoid a shortage.                                                                      |
+| `suggested_orders`              | The quantity that should be ordered, offset by lead time. This is the primary action field.                                                                           |
+| `projected_on_hand_inventory`   | The projected stock on hand at the end of the period after considering all demand, supply, and suggested receipts.                                                    |

@@ -13,9 +13,9 @@ const header = {
       onClick: toggleTheme,
     },
     {
-      label: 'Help',
-      icon: 'settings',
-      onClick: () => alert('Help clicked!'),
+      label: 'Documentation',
+      icon: 'book',
+      onClick: () => open("/erpnext_mrp_introduction", "_blank"),
     },
     {
       label: 'Logout',

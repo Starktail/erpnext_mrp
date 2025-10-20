@@ -12,13 +12,20 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "cd frontend && yarn dev",
-    "build": "cd frontend && yarn build",
+    "build": "yarn docs:build && cd frontend && yarn build",
     "postinstall": "yarn install-web",
-    "install-web": "cd frontend && yarn install"
+    "install-web": "cd frontend && yarn install",
+    "docs:build": "vitepress build docs && ./prepare_help_files.sh",
+    "docs:dev": "vitepress dev docs --host",
+    "docs:preview": "vitepress preview docs"
   },
   "keywords": [],
-  "author": "",
+  "author": "Dirk van der Laarse <dirk@laarse.co.za>",
   "license": "mit",
-  "devDependencies": {},
-  "dependencies": {}
+  "devDependencies": {
+    "vitepress": "^2.0.0-alpha.12",
+    "vue": "^3.5.22"
+  },
+  "dependencies": {},
+  "repository": "https://github.com/dvdl16/erpnext_mrp.git"
 }

@@ -1,11 +1,20 @@
-### MRP Tools for ERPNext
+<div align="center" markdown="1">
 
-MRP Tools for ERPNext
-
-> #### 🚧🚧 This app is still in requirements generation and POC phase 🚧🚧
+<img src="erpnext_mrp/public/mrp-logo.png" width="80" />
 
 
-![demo screenshot](docs/demo.png)
+# MRP Tools for ERPNext
+
+**Material Requirements Planning (MRP) app for ERPNext**
+![demo screenshot](docs/images/workbench.png)
+</div>
+
+
+## MRP Tools for ERPNext
+
+### User Documentation
+
+📄 [MRP Tools for ERPNext Documentation](#)
 
 ### Installation
 
@@ -60,6 +69,11 @@ This app can use GitHub Actions for CI. The following workflows are configured:
 
 - CI: Installs this app and runs unit tests on every push to `develop` branch.
 - Linters: Runs [Frappe Semgrep Rules](https://github.com/frappe/semgrep-rules) and [pip-audit](https://pypi.org/project/pip-audit/) on every pull request.
+
+
+#### Updating Documentation
+
+For documentation, we use [vitepress](https://vitepress.dev/). You can run `yarn docs:dev` to preview the docs when applying changes
 
 
 ### License
