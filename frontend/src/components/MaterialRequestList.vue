@@ -9,6 +9,7 @@
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
+        <div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-4 h-4 rounded" style="background-color: #ffdddd;"></div>
           <span class="text-gray-600">Urgent Item</span>
@@ -182,8 +183,35 @@ export default {
         }
       };
     },
+    last_mrp_run() {
+      return {
+        type: 'list',
+        doctype: 'Scheduled Job Log',
+        fields: ['creation'],
+        filters: {
+          scheduled_job_type: 'mrp_run.mrp_run'
+        },
+        orderBy: 'creation desc',
+        pageLength: 1,
+        auto: true
+      }
+    },
   },
   computed: {
+    lastMrpRunTime() {
+      if (this.$resources.last_mrp_run.loading) {
+        return 'Loading...';
+      }
+      if (!this.$resources.last_mrp_run.data || this.$resources.last_mrp_run.data.length === 0) {
+        return 'MRP has not run yet.';
+      }
+      const lastRun = this.$resources.last_mrp_run.data[0];
+      if (lastRun) {
+        const d = new Date(lastRun.creation);
+        return `Last MRP Run: ${d.toLocaleString()}`;
+      }
+      return 'MRP has not run yet.';
+    },
     mrpEntryRows() {
       if (this.$resources.mrp_entries.loading || !this.$resources.mrp_entries.data) {
         return null; // AG Grid will show its loading overlay
