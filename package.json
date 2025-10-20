@@ -16,6 +16,7 @@
     "postinstall": "yarn install-web",
     "install-web": "cd frontend && yarn install",
     "docs:build": "vitepress build docs && ./prepare_help_files.sh",
+    "docs:build-gh": "vitepress build docs --outDir docs/.vitepress/dist",
     "docs:dev": "vitepress dev docs --host",
     "docs:preview": "vitepress preview docs"
   },
