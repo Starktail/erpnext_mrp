@@ -14,7 +14,7 @@
 
 ### User Documentation
 
-📄 [MRP Tools for ERPNext Documentation](#)
+📄 [MRP Tools for ERPNext Documentation](https://erpnext-mrp-docs.starktail.com/erpnextmrp_introduction)
 
 ### Installation
 
