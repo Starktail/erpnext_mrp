@@ -18,6 +18,7 @@ The workbench displays the MRP data in a pivoted grid:
 The workbench includes several features to help you analyze and manage your material plan:
 
 -   **Clear Filters**: Action to reset the grid's filters.
+-   **Rerun MRP Calculations**: This action triggers a background job to recalculate the entire material requirements plan. A dialog will appear to confirm that the process has started and will provide a link to monitor the background job's progress. Once the calculation is complete, you can reload the page to see the updated plan.
 -   **Export to CSV**: Export the current view of the MRP grid to a CSV file for offline analysis or reporting.
 -   **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns when they are collapsed. This is useful for quickly scanning key metrics like `Suggested Orders` or `Projected On Hand Inventory` across the timeline.
 -   **Visual Cues**: The grid uses color coding to draw attention to important items:

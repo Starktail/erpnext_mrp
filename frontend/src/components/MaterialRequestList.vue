@@ -3,7 +3,7 @@
     <div class="mb-4 flex justify-between items-center">
       <div class="flex gap-2 items-center">
         <Button @click="clearFilters">Clear Filters</Button>
-        <Button @click="reload">Reload</Button>
+        <Button @click="rerunMrp">Rerun MRP Calculations</Button>
         <Button @click="exportToCsv">Export to CSV</Button>
         <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
       </div>
@@ -39,6 +39,21 @@
       rowSelection="multiple"
       @selection-changed="onSelectionChanged"
     />
+    <Dialog v-model="showRerunDialog" @hide="showRerunDialog = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">MRP Calculations Started</h3>
+      </template>
+      <template #body-content>
+        <div>
+          <p>The MRP calculations have been started in the background.</p>
+          <p>You can monitor the progress of the job here: <a href="/app/rq-job" target="_blank" class="text-blue-600 hover:underline">View Background Jobs</a></p>
+          <p>Once the job is complete, you can reload this page to see the updated results.</p>
+        </div>
+      </template>
+      <template #actions>
+        <Button @click="showRerunDialog = false">Close</Button>
+      </template>
+    </Dialog>
     <Dialog v-model="showDialog" @hide="showDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">Material Request Details</h3>
@@ -137,9 +152,18 @@ export default {
       selectedItemsSummary: [],
       showSuccessDialog: false,
       newlyCreatedDocs: [],
+      showRerunDialog: false,
     };
   },
   resources: {
+    mrp_runner() {
+      return {
+        url: 'erpnext_mrp.mrp.tasks.mrp_run.mrp_run',
+        onSuccess: () => {
+          this.showRerunDialog = true;
+        }
+      }
+    },
     mrp_entries() {
       return {
         type: 'list',
@@ -387,6 +411,9 @@ export default {
     },
     clearFilters() {
       this.gridApi.setFilterModel(null);
+    },
+    rerunMrp() {
+      this.$resources.mrp_runner.submit();
     },
     reload() {
       this.$resources.mrp_entries.reload();
