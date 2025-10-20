@@ -6,6 +6,7 @@
         <Button @click="rerunMrp">Rerun MRP Calculations</Button>
         <Button @click="exportToCsv">Export to CSV</Button>
         <Combobox :options="quantityFields" v-model="closed_column_field" placeholder="Select a field" />
+        <Checkbox v-model="onlyShowSuggested" label="Only show items with suggested orders"></Checkbox>
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
@@ -113,7 +114,7 @@
 import { nextTick } from "vue";
 import { AgGridVue } from "ag-grid-vue3";
 // AG Grid CSS is now imported in main.js
-import { Button, Dialog, Combobox, createDocumentResource } from 'frappe-ui'; // Import Button and Dialog components
+import { Button, Dialog, Combobox, Checkbox } from 'frappe-ui'; // Import Button and Dialog components
 
 export default {
   name: 'MaterialRequestList',
@@ -121,6 +122,7 @@ export default {
     AgGridVue,
     Dialog, // Register the Dialog component
     Combobox, // Register the Combobox component
+    Checkbox,
     buttonCellRenderer: { 
       name: 'ButtonCellRenderer',
       template: `<Button @click="onButtonClick">Planning Detail</Button>`,
@@ -153,12 +155,14 @@ export default {
       showSuccessDialog: false,
       newlyCreatedDocs: [],
       showRerunDialog: false,
+      onlyShowSuggested: false,
     };
   },
   resources: {
     mrp_runner() {
       return {
-        url: 'erpnext_mrp.mrp.tasks.mrp_run.mrp_run',
+        type: 'run_method',
+        method: 'erpnext_mrp.mrp.tasks.mrp_run.mrp_run',
         onSuccess: () => {
           this.showRerunDialog = true;
         }
@@ -282,7 +286,15 @@ export default {
         });
       });
 
-      return Object.values(items);
+      let item_rows = Object.values(items);
+
+      if (this.onlyShowSuggested) {
+        item_rows = item_rows.filter(row => {
+          return Object.keys(row).some(key => key.endsWith('_suggested_orders') && row[key] > 0);
+        });
+      }
+
+      return item_rows;
     },
     dynamicColumnDefs() {
       const staticColumns = [
@@ -413,7 +425,7 @@ export default {
       this.gridApi.setFilterModel(null);
     },
     rerunMrp() {
-      this.$resources.mrp_runner.submit();
+      this.$resources.mrp_runner.run();
     },
     reload() {
       this.$resources.mrp_entries.reload();
