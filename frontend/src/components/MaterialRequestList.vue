@@ -235,7 +235,20 @@ export default {
     dynamicColumnDefs() {
       const staticColumns = [
         { headerName: 'Select', checkboxSelection: true, headerCheckboxSelection: true, pinned: 'left', width: 50 },
-        { field: 'item_code', headerName: 'Item Code', sortable: true, filter: true, width: 120, pinned: 'left' },
+        {
+          field: 'item_code',
+          headerName: 'Item Code',
+          sortable: true,
+          filter: true,
+          width: 120,
+          pinned: 'left',
+          cellRenderer: params => {
+            if (params.value) {
+              return `<a href="/app/item/${params.value}" target="_blank" class="text-blue-600 hover:underline">${params.value}</a>`;
+            }
+            return null;
+          }
+        },
         { field: 'item_name', headerName: 'Item Name', sortable: true, filter: true, pinned: 'left' },
         { field: 'item_group', headerName: 'Item Group', sortable: true, filter: true, width: 120 },
         { field: 'uom', headerName: 'Uom', sortable: true, filter: true, width: 100 },
