@@ -260,7 +260,7 @@ standard_help_items = [
 	{
 		"item_label": "MRP Tools for ERPNext Documentation",
 		"item_type": "Route",
-		"route": "/erpnext_mrp_introduction",
+		"route": "/erpnextmrp_introduction",
 		"is_standard": 1,
 	},
 ]

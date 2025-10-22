@@ -15,7 +15,7 @@ const header = {
     {
       label: 'Documentation',
       icon: 'book',
-      onClick: () => open("/erpnext_mrp_introduction", "_blank"),
+      onClick: () => open("/erpnextmrp_introduction", "_blank"),
     },
     {
       label: 'Logout',
