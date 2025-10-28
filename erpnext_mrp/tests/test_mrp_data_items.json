@@ -1,0 +1,62 @@
+[
+  {
+    "item_code": "SRZ00967",
+    "item_name": "MRP Test Sub-Sub-Assembly",
+    "item_group": "_Test Item Group B",
+    "lead_time_days": 7
+  },
+  {
+    "item_code": "SRZ00963",
+    "item_name": "MRP Test Sub-Assembly",
+    "item_group": "_Test Item Group B",
+    "lead_time_days": 21
+  },
+  {
+    "item_code": "SR04820",
+    "item_name": "MRP Test Sales Item (Assembly)",
+    "item_group": "_Test Item Group A",
+    "lead_time_days": 14
+  },
+  {
+    "item_code": "SRZ00960",
+    "item_name": "MRP Test BOM Item 1",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 28
+  },
+  {
+    "item_code": "SRZ00961",
+    "item_name": "MRP Test BOM Item 2",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 7
+  },
+  {
+    "item_code": "SRZ00962",
+    "item_name": "MRP Test BOM Item 3",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 3
+  },
+  {
+    "item_code": "SRZ00966",
+    "item_name": "MRP Test SA BOM Item 3",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 28
+  },
+  {
+    "item_code": "SRZ00965",
+    "item_name": "MRP Test SA BOM Item 2",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 14
+  },
+  {
+    "item_code": "SRZ00964",
+    "item_name": "MRP Test SA BOM Item 1",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 7
+  },
+  {
+    "item_code": "SRZ00968",
+    "item_name": "MRP Test SSA BOM Item 1",
+    "item_group": "_Test Item Group C",
+    "lead_time_days": 28
+  }
+]

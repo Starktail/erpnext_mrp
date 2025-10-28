@@ -1,0 +1,65 @@
+[
+  {
+    "item": "SRZ00967",
+    "raw_materials": [
+      {
+        "item_code": "SRZ00968",
+        "qty": 1
+      },
+      {
+        "item_code": "SRZ00960",
+        "qty": 4
+      }
+    ]
+  },
+  {
+    "item": "SRZ00963",
+    "raw_materials": [
+      {
+        "item_code": "SRZ00964",
+        "qty": 2
+      },
+      {
+        "item_code": "SRZ00966",
+        "qty": 2
+      },
+      {
+        "item_code": "SRZ00967",
+        "qty": 1
+      },
+      {
+        "item_code": "SRZ00965",
+        "qty": 2
+      }
+    ]
+  },
+  {
+    "item": "SR04820",
+    "raw_materials": [
+      {
+        "item_code": "SRZ00960",
+        "qty": 1
+      },
+      {
+        "item_code": "SRZ00961",
+        "qty": 4
+      },
+      {
+        "item_code": "SRZ00962",
+        "qty": 10
+      },
+      {
+        "item_code": "SRZ00963",
+        "qty": 1
+      }
+    ]
+  }
+]
+
+
+
+
+
+
+
+

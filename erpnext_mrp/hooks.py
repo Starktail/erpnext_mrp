@@ -169,7 +169,7 @@ scheduler_events = {
 # Testing
 # -------
 
-# before_tests = "erpnext_mrp.install.before_tests"
+before_tests = "erpnext_mrp.utils.before_tests"
 
 # Overriding Methods
 # ------------------------------
