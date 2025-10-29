@@ -186,7 +186,7 @@ export default {
           "target_date",
           "on_hand_inventory",
           "open_orders",
-          "forecast_demand",
+          "total_forecast_demand",
           "scheduled_receipts",
           "suggested_receipts",
           "suggested_orders",
@@ -274,7 +274,7 @@ export default {
         const fieldsToPivot = [
             'on_hand_inventory',
             'open_orders',
-            'forecast_demand',
+            'total_forecast_demand',
             'scheduled_receipts',
             'suggested_receipts',
             'suggested_orders',
@@ -402,7 +402,7 @@ export default {
       return [
           { value: 'on_hand_inventory', label: 'On Hand Inventory' },
           { value: 'open_orders', label: 'Open Orders' },
-          { value: 'forecast_demand', label: 'Forecast Demand' },
+          { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
           { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
           { value: 'suggested_receipts', label: 'Suggested Receipts' },
           { value: 'suggested_orders', label: 'Suggested Orders', cellStyle: params => params.value > 0 ? { background: '#ddeeff' } : null },
