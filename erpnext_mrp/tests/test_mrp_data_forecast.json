@@ -1,0 +1,127 @@
+[
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2025-12-01",
+   "forecast_quantity": 5
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2025-12-08",
+   "forecast_quantity": 10
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2025-12-15",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2025-12-22",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2025-12-29",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-01-05",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-01-12",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-01-19",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-01-26",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-02-02",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-02-09",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-02-16",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-02-23",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-03-02",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-03-09",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-03-16",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-03-23",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-03-30",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-04-06",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-04-13",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-04-20",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-04-27",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-05-04",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-05-11",
+   "forecast_quantity": 15
+ },
+ {
+   "item_code": "SR04820",
+   "forecast_date": "2026-05-18",
+   "forecast_quantity": 15
+ }
+]

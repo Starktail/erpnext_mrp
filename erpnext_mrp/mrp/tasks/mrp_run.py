@@ -84,7 +84,12 @@ def create_mrp_item_entries():
         SELECT
             t_item.name AS item_code,
             t_item.lead_time_days AS lead_time,
-            COALESCE(bl.bom_level, 0) AS bom_level
+            COALESCE(bl.bom_level, 0) AS bom_level,
+            (EXISTS (
+                SELECT 1
+                FROM `tabBOM` AS t_bom
+                WHERE t_bom.item = t_item.name AND t_bom.is_active = 1 AND t_bom.is_default = 1
+            )) AS is_manufactured
         FROM
             `tabItem` AS t_item
         LEFT JOIN
@@ -129,18 +134,18 @@ def create_mrp_item_entries():
     period_data = list(periods.items())
 
     # 4. Efficiently combine items and periods and prepare for bulk insert
-    # item is a tuple: (item_code, bom_level)
+    # item is a tuple: (item_code, bom_level, is_manufactured)
     # period is a tuple: (period_str, target_date)
     owner = frappe.session.user
     creation = datetime.datetime.now()
     final_values = [
-        (f"{item[0]}{period[0]}", item[0], item[1], item[2], period[1], owner, creation)
+        (f"{item[0]}{period[0]}", item[0], item[1], item[2], item[3], period[1], owner, creation)
         for item, period in itertools.product(item_list, period_data)
     ]
     # 5. Perform a bulk insert of all generated records
     frappe.db.bulk_insert(
         "MRP Entry",
-        fields=["name", "item_code", "lead_time", "bom_level", "target_date", "owner", "creation"],
+        fields=["name", "item_code", "lead_time", "bom_level", "is_manufactured", "target_date", "owner", "creation"],
         values=final_values,
         ignore_duplicates=True,
     )

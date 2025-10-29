@@ -9,6 +9,7 @@
   "item_code",
   "bom_level",
   "target_date",
+  "is_manufactured",
   "item_name",
   "item_group",
   "default_supplier",
@@ -214,12 +215,18 @@
    "fieldtype": "Link",
    "label": "Default Supplier",
    "options": "Supplier"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_manufactured",
+   "fieldtype": "Check",
+   "label": "Is Manufactured"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-29 19:51:00.236375",
+ "modified": "2025-10-29 11:17:09.779733",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

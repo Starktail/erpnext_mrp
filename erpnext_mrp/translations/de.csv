@@ -19,3 +19,5 @@ Look Ahead,Blick nach vorn
 Total Requirement based on,Gesamtbedarf basierend auf
 Forecast Date,Prognosedatum
 Forecast Quantity,Prognosemenge
+Is Manufactured,Wird hergestellt
+If this item has an Active BOM it's considered as a Manufactured Item,Wenn dieser Artikel eine aktive Stückliste besitzt gilt er als gefertigter Artikel.
