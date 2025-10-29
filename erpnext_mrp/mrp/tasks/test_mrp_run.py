@@ -61,8 +61,6 @@ class TestMRPRun(FrappeTestCase):
 		mrp_settings.save()
 		self.mrp_settings = mrp_settings
 
-		frappe.db.commit() 
-
 	def test_create_mrp_item_entries(self):
 		"""
 		Test that MRP Entry records are created successfully
