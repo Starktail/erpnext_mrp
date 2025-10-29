@@ -231,13 +231,15 @@ def _update_upstream_forecast_demand():
     Explodes forecast demand from parent items down to their components using a recursive CTE.
     """
     sql_query = f"""
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level) AS (
+        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level, lead_time, is_manufactured) AS (
             -- Anchor: Initial demand from MRP entries with forecast_demand
             SELECT
                 item_code,
                 target_date,
                 forecast_demand,
-                0 as level
+                0 as level,
+                lead_time,
+                is_manufactured
             FROM `tabMRP Entry`
             WHERE forecast_demand > 0
 
@@ -246,12 +248,18 @@ def _update_upstream_forecast_demand():
             -- Recursive Step: Explode demand to child components
             SELECT
                 bom_item.item_code,
-                de.target_date,
+                CASE
+                    WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
+                    ELSE de.target_date
+                END,
                 de.required_qty * bom_item.stock_qty,
-                de.level + 1
+                de.level + 1,
+                child_item.lead_time_days,
+                (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
             FROM DemandExplosion AS de
             JOIN `tabBOM` AS bom ON de.item_code = bom.item
             JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
+            JOIN `tabItem` AS child_item ON bom_item.item_code = child_item.name
             WHERE bom.is_active = 1 AND bom.is_default = 1
         ),
         AggregatedDemand AS (
