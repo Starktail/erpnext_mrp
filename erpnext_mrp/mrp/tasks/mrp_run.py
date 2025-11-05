@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import math
+from datetime import date
 
 import frappe
 from frappe import _
@@ -120,7 +121,7 @@ def create_mrp_item_entries():
         raise ValueError(_("Only 'Calendar Week' is a supported period type"))
     look_ahead = settings.look_ahead or 6
 
-    today = datetime.date.today()
+    today = date.today()
     # Use a dictionary to store unique periods with their target dates
     periods = {}
     for i in range(look_ahead):
@@ -163,9 +164,9 @@ def process_mrp_item_entries(enqueue: bool):
 
 
 def update_open_orders_demand():
-    _update_reserved_qty()
-    _update_reserved_qty_for_production()
-    _update_upstream_so_demand()
+	_update_reserved_qty()
+	_update_reserved_qty_for_production()
+	_update_upstream_so_demand()
 
 
 def update_forecast_demand():
@@ -179,15 +180,15 @@ def _update_forecast_demand():
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
-    start_date = datetime.date.today()
+    start_date = date.today()
     end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
     sql_query = f"""
         SELECT
             item_code,
             CASE
-                WHEN forecast_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
-                ELSE DATE_FORMAT(forecast_date, '%%YCW%%v')
+                WHEN forecast_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT(forecast_date, '%%xCW%%v')
             END AS calendar_week,
             SUM(forecast_quantity) AS total_forecast_quantity
         FROM `tabMRP Forecast`
@@ -266,7 +267,7 @@ def _update_upstream_forecast_demand():
             -- Aggregate demand for each component by week
             SELECT
                 item_code,
-                DATE_FORMAT(target_date, '%YCW%v') AS calendar_week,
+                DATE_FORMAT(target_date, '%xCW%v') AS calendar_week,
                 SUM(required_qty) AS total_demand
             FROM DemandExplosion
             WHERE level > 0
@@ -323,17 +324,17 @@ def _update_reserved_qty():
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
-    start_date = datetime.date.today()
+    start_date = date.today()
     end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
-    # Note: DATE_FORMAT(date, '%%YCW%%v') is used to create the week string, e.g., '2025CW39'.
+    # Note: DATE_FORMAT(date, '%%xCW%%v') is used to create the week string, e.g., '2025CW39'.
     # The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
     sql_query = f"""
         SELECT
             item_code,
             CASE
-                WHEN delivery_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
-                ELSE DATE_FORMAT(delivery_date, '%%YCW%%v')
+                WHEN delivery_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT(delivery_date, '%%xCW%%v')
             END AS calendar_week,
             SUM(reserved_qty) AS total_reserved_qty
         FROM (
@@ -425,15 +426,15 @@ def _update_reserved_qty_for_production():
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
-    start_date = datetime.date.today()
+    start_date = date.today()
     end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
     sql_query = f"""
         SELECT
             wo_item.item_code,
             CASE
-                WHEN wo.planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
-                ELSE DATE_FORMAT(wo.planned_start_date, '%%YCW%%v')
+                WHEN wo.planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT(wo.planned_start_date, '%%xCW%%v')
             END AS calendar_week,
             SUM(wo_item.required_qty - wo_item.transferred_qty) AS total_required_qty
         FROM `tabWork Order Item` AS wo_item
@@ -484,34 +485,42 @@ def _update_upstream_so_demand():
     Explodes open orders demand from parent items down to their components using a recursive CTE.
     """
     sql_query = f"""
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level) AS (
-            -- Anchor: Initial demand from MRP entries with open_orders
+        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level, lead_time, is_manufactured) AS (
+            -- Anchor: Initial demand from MRP entries with reserved_qty
             SELECT
                 item_code,
                 target_date,
-                open_orders,
-                0 as level
+                reserved_qty,
+                0 as level,
+                lead_time,
+                is_manufactured
             FROM `tabMRP Entry`
-            WHERE open_orders > 0
+            WHERE reserved_qty > 0
 
             UNION ALL
 
             -- Recursive Step: Explode demand to child components
             SELECT
                 bom_item.item_code,
-                de.target_date,
+                CASE
+                    WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
+                    ELSE de.target_date
+                END,
                 de.required_qty * bom_item.stock_qty,
-                de.level + 1
+                de.level + 1,
+                child_item.lead_time_days,
+                (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
             FROM DemandExplosion AS de
             JOIN `tabBOM` AS bom ON de.item_code = bom.item
             JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
+            JOIN `tabItem` AS child_item ON bom_item.item_code = child_item.name
             WHERE bom.is_active = 1 AND bom.is_default = 1
         ),
         AggregatedDemand AS (
             -- Aggregate demand for each component by week
             SELECT
                 item_code,
-                DATE_FORMAT(target_date, '%YCW%v') AS calendar_week,
+                DATE_FORMAT(target_date, '%xCW%v') AS calendar_week,
                 SUM(required_qty) AS total_demand
             FROM DemandExplosion
             WHERE level > 0
@@ -559,15 +568,15 @@ def _update_planned_qty():
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
-    start_date = datetime.date.today()
+    start_date = date.today()
     end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
     sql_query = f"""
         SELECT
             production_item,
             CASE
-                WHEN planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
-                ELSE DATE_FORMAT(planned_start_date, '%%YCW%%v')
+                WHEN planned_start_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT(planned_start_date, '%%xCW%%v')
             END AS calendar_week,
             SUM(qty - produced_qty) AS total_planned_qty
         FROM `tabWork Order`
@@ -621,15 +630,15 @@ def _update_ordered_qty():
     """
     settings = frappe.get_cached_doc("MRP Settings")
     look_ahead = settings.look_ahead or 6
-    start_date = datetime.date.today()
+    start_date = date.today()
     end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
     sql_query = f"""
         SELECT
             po_item.item_code,
             CASE
-                WHEN po_item.schedule_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%YCW%%v')
-                ELSE DATE_FORMAT(po_item.schedule_date, '%%YCW%%v')
+                WHEN po_item.schedule_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT(po_item.schedule_date, '%%xCW%%v')
             END AS calendar_week,
             SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty
         FROM `tabPurchase Order Item` AS po_item
@@ -688,7 +697,7 @@ def calculate_totals():
 
 def calculate_suggestions_and_projected_stock(enqueue: bool):
     # Get stock levels
-    filters = frappe._dict({"from_date": datetime.date.today(), "to_date": datetime.date.today()})
+    filters = frappe._dict({"from_date": date.today(), "to_date": date.today()})
     stock_level_report = execute_stock_balance_report(filters=filters)
     # First row contains headers, second row contains data
     stock_levels = stock_level_report[1]
