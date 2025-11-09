@@ -17,7 +17,7 @@ add_to_apps_screen = [
 		"logo": "/assets/erpnext_mrp/mrp-logo.png",
 		"title": "MRP Tools",
 		"route": "/erpnext_mrp",
-        "has_permission": "erpnext_mrp.api.check_app_permission"
+		"has_permission": "erpnext_mrp.api.check_app_permission",
 	}
 ]
 
@@ -83,7 +83,7 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "erpnext_mrp.install.before_install"
-# after_install = "erpnext_mrp.install.after_install"
+after_install = "erpnext_mrp.patches.v0.set_item_lead_time_field.execute"
 
 # Uninstallation
 # ------------
@@ -152,9 +152,7 @@ scheduler_events = {
 	# "all": [
 	# 	"erpnext_mrp.tasks.all"
 	# ],
-	"daily": [
-		"erpnext_mrp.mrp.tasks.mrp_run.mrp_run"
-	],
+	"daily": ["erpnext_mrp.mrp.tasks.mrp_run.mrp_run"],
 	# "hourly": [
 	# 	"erpnext_mrp.tasks.hourly"
 	# ],

@@ -21,3 +21,7 @@ Forecast Date,Prognosedatum
 Forecast Quantity,Prognosemenge
 Is Manufactured,Wird hergestellt
 If this item has an Active BOM it's considered as a Manufactured Item,Wenn dieser Artikel eine aktive Stückliste besitzt gilt er als gefertigter Artikel.
+Item Lead Time Field,Feld für die Artikel-Lieferzeit
+Item Additional Lead Time Field,Feld für zusätzliche Lieferzeit
+The Item field to use as "Lead Time",Das Feld „Artikel“ soll als „Lieferzeit“ verwendet werden.
+An Item field to include in the Lead Time calculation,Ein Artikelfeld, das in die Lieferzeitberechnung einbezogen werden soll

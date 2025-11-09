@@ -10,7 +10,6 @@ def before_tests():
 
 	print("Running before_tests")
 	if not frappe.db.a_row_exists("Company"):
-
 		print("Running setup_complete because company does not exist")
 		current_year = now_datetime().year
 		setup_complete(
