@@ -6,6 +6,11 @@ The core of the MRP Tools is a background process that calculates the material p
 
 ![MRP Settings](images/mrp_settings.png)
 
+The `MRP Settings` doctype allows you to configure various parameters for the MRP calculation:
+
+-   **Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
+-   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
+
 The calculation is executed in several distinct stages:
 
 ### 2. Item and Period Scaffolding
@@ -61,7 +66,7 @@ The following are the key fields calculated for each item in each period:
 | `target_date`                   | The target date for the planning period (week).                                                                                                                       |
 | `reorder_level`                 | The minimum stock level for the item.                                                                                                                                 |
 | `reorder_quantity`              | The minimum order quantity (MOQ) for the item.                                                                                                                        |
-| `lead_time`                     | The lead time (in days) for procuring or manufacturing the item.                                                                                                      |
+| `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings. |
 | `is_urgent`                     | A flag indicating if an order for this item is past its required start date.                                                                                          |
 | **Inventory & Demand**          |                                                                                                                                                                       |
 | `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
