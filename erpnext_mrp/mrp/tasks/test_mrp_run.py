@@ -215,13 +215,126 @@ class TestMRPRun(FrappeTestCase):
 
 		# Expect an upstream forecast demand for "SRZ00968 - MRP Test SSA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00968", forecast_date)
-		self.assertEquals(mrp_entry.upstream_forecast_demand, 1) # Qty of 1, as per BOM
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
 
 		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
-		self.assertEquals(mrp_entry.upstream_forecast_demand, 4) # Qty of 4, as per BOM
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
 		# ==============================================================================================================
 
+	def test_process_mrp_item_entries_with_additional_lead_time(self, mock_date):
+		"""
+		Test that MRP Entry records have correct upstream forecast when using an additional lead time field
+		"""
+		# Create a custom field to use as additional lead time
+		if not frappe.db.exists("Custom Field", "Item-custom_additional_lead_time"):
+			frappe.get_doc(
+				{
+					"doctype": "Custom Field",
+					"dt": "Item",
+					"fieldname": "custom_additional_lead_time",
+					"label": "Custom Additional Lead Time",
+					"fieldtype": "Int",
+					"insert_after": "lead_time_days",
+				}
+			).insert()
+
+		# Update a few items with values for the custom field
+		# Original lead_time_days is 14. Total is now 15.
+		frappe.db.set_value("Item", "SR04820", "custom_additional_lead_time", 1)
+		# Original lead_time_days is 21. Total is now 23.
+		frappe.db.set_value("Item", "SRZ00963", "custom_additional_lead_time", 2)
+		# Original lead_time_days is 7. Total is now 10.
+		frappe.db.set_value("Item", "SRZ00967", "custom_additional_lead_time", 3)
+
+		# Update MRP Settings to use the custom field
+		self.mrp_settings.item_additional_lead_time_field = (
+			"custom_additional_lead_time | Custom Additional Lead Time"
+		)
+		self.mrp_settings.save()
+
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# Create an MRP Forecast for ~70 days (compound lead time for our test item) from now
+		final_item_forecast_date = add_to_date(test_start_day, days=70)
+		mrp_forecast = {
+			"item_code": "SR04820",
+			"forecast_date": final_item_forecast_date,
+			"forecast_quantity": 1,
+		}
+		create_mrp_forecast(mrp_forecast)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		frappe.db.commit()
+
+		# Expect a forecast demand for the "SR04820 - MRP Test Sales Item (Assembly)" in the correct period
+		mrp_entry = get_mrp_entry_by_item_week("SR04820", final_item_forecast_date)
+		self.assertEquals(mrp_entry.forecast_demand, 1)
+
+		# ==============================================================================================================
+		# Validate items that are consumed by "SR04820 - MRP Test Sales Item (Assembly)"
+		# This manufactured item has a lead time of 14 + 1 = 15 days
+		# ==============================================================================================================
+		forecast_date = add_to_date(final_item_forecast_date, days=-15)
+
+		# Expect an upstream forecast demand for "SRZ00963 - MRP Test Sub-Assembly"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00963", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00962 - MRP Test BOM Item 3"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00962", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 10)  # Qty of 10, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00961 - MRP Test BOM Item 2"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00961", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		# ==============================================================================================================
+
+		# ==============================================================================================================
+		# Validate items that are consumed by "SRZ00963 - MRP Test Sub-Assembly"
+		# This manufactured item has a lead time of 21 + 2 = 23 days
+		# Meaning, forecast for the sub-items below should be 23 + 15 days before the forecast date for the final item
+		# ==============================================================================================================
+		forecast_date = add_to_date(final_item_forecast_date, days=-(15 + 23))
+
+		# Expect an upstream forecast demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00967", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00964 - MRP Test SA BOM Item 1"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00964", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00966 - MRP Test SA BOM Item 3"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00966", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00965 - MRP Test SA BOM Item 2"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00965", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		# ==============================================================================================================
+
+		# ==============================================================================================================
+		# Validate items that are consumed by "SRZ00967 - MRP Test Sub-Sub-Assembly"
+		# This manufactured item has a lead time of 7 + 3 = 10 days
+		# Meaning, forecast for the sub-items below should be 10 + 23 + 15 days before the forecast date for the final item
+		# ==============================================================================================================
+		forecast_date = add_to_date(final_item_forecast_date, days=-(15 + 23 + 10))
+
+		# Expect an upstream forecast demand for "SRZ00968 - MRP Test SSA BOM Item 1"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00968", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+
+		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
+		self.assertEquals(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+		# ==============================================================================================================
 
 	def test_process_mrp_item_entries_have_correct_upstream_sales_order_demand(self, mock_date):
 		"""

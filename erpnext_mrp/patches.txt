@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 
 erpnext_mrp.patches.v0.add_help_link
+erpnext_mrp.patches.v0.set_item_lead_time_field

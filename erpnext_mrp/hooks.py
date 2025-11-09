@@ -83,7 +83,7 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "erpnext_mrp.install.before_install"
-# after_install = "erpnext_mrp.install.after_install"
+after_install = "erpnext_mrp.patches.v0.set_item_lead_time_field.execute"
 
 # Uninstallation
 # ------------
