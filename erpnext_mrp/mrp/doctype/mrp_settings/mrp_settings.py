@@ -1,21 +1,21 @@
 # Copyright (c) 2025, Finfoot Tech (Pty) Ltd and contributors
 # For license information, please see license.txt
 
+from collections import namedtuple
 from typing import List
 
 import frappe
-from frappe.model.document import Document
 from frappe import _
-from collections import namedtuple
+from frappe.model.document import Document
 from frappe.utils import nowdate
-from frappe.utils.safe_exec import get_safe_globals
 from frappe.utils.caching import redis_cache
+from frappe.utils.safe_exec import get_safe_globals
 
 
 class MRPSettings(Document):
 	def validate(self):
 		self.validate_condition()
-	
+
 	def validate_condition(self):
 		temp_doc = frappe.new_doc("Item")
 		if self.item_condition:
@@ -51,6 +51,7 @@ class MRPSettings(Document):
 			filters=[["fieldtype", "not in", invalid_field_types], ["dt", "=", doctype]],
 		)
 		return docfields + custom_fields
+
 
 def get_context(doc):
 	Frappe = namedtuple("frappe", ["utils"])
