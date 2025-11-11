@@ -10,6 +10,7 @@ The `MRP Settings` doctype allows you to configure various parameters for the MR
 
 -   **Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
 -   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
+-   **Purchase Order Item Delivery Date Field**: This setting allows you to select a mandatory Date DocField from the `Purchase Order Item` doctype. This field will be used as the delivery date for calculating `Ordered Qty` in the MRP run. By default, `schedule_date` is used.
 
 The calculation is executed in several distinct stages:
 
@@ -38,7 +39,7 @@ Next, the system calculates all sources of demand.
 The system then calculates all sources of future supply.
 
 - **Planned Qty**: Calculates scheduled receipts from open Work Orders for manufactured items.
-- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items.
+- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items. The delivery date for these receipts is determined by the `Purchase Order Item Delivery Date Field` set in `MRP Settings`.
 
 ### 5. Totals and Projections
 

@@ -13,6 +13,7 @@
   "item_condition",
   "item_lead_time_field",
   "item_additional_lead_time_field",
+  "po_item_delivery_date_field",
   "column_break_bdmb",
   "html_rsvb"
  ],
@@ -77,6 +78,13 @@
    "reqd": 1
   },
   {
+   "description": "A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field.",
+   "fieldname": "po_item_delivery_date_field",
+   "fieldtype": "Select",
+   "label": "Purchase Order Item Delivery Date Field",
+   "reqd": 1
+  },
+  {
    "description": "An Item field to include in the Lead Time calculation",
    "fieldname": "item_additional_lead_time_field",
    "fieldtype": "Select",
@@ -87,7 +95,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-09 19:56:15.501162",
+ "modified": "2025-11-11 12:32:25.177232",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

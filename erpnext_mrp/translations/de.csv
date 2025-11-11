@@ -25,3 +25,5 @@ Item Lead Time Field,Feld für die Artikel-Lieferzeit
 Item Additional Lead Time Field,Feld für zusätzliche Lieferzeit
 The Item field to use as "Lead Time",Das Feld „Artikel“ soll als „Lieferzeit“ verwendet werden.
 An Item field to include in the Lead Time calculation,Ein Artikelfeld, das in die Lieferzeitberechnung einbezogen werden soll
+Purchase Order Item Delivery Date Field,Feld für Lieferdatum der Bestellposition
+A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field.,Ein Feld im Feld „Bestellposition“ das als Lieferdatum bei der Berechnung der Bestellmenge verwendet werden soll. Muss ein Pflichtfeld sein.
