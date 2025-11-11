@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 from collections import namedtuple
-from typing import List
+from typing import List, Optional
 
 import frappe
 from frappe import _
@@ -26,9 +26,9 @@ class MRPSettings(Document):
 
 	@frappe.whitelist()
 	@redis_cache(ttl=600)
-	def get_item_docfields(self, doctype: str) -> List[dict]:
+	def get_docfields(self, doctype: str, field_type: Optional[str] = None, mandatory_fields_only: Optional[bool] = False) -> List[dict]:
 		"""
-		Get a list of DocFields for the Item Doctype
+		Get a list of DocFields for the given Doctype
 		"""
 		invalid_field_types = [
 			"Column Break",
@@ -40,15 +40,17 @@ class MRPSettings(Document):
 			"Table",
 			"Table MultiSelect",
 		]
+		field_type_filter = ["fieldtype", "=", field_type] if field_type else ["fieldtype", "not in", invalid_field_types]
+		mandatory_fields_filters = [["reqd", "=", "1"]] if mandatory_fields_only else []
 		docfields = frappe.get_all(
 			"DocField",
 			fields=["label", "name", "fieldname"],
-			filters=[["fieldtype", "not in", invalid_field_types], ["parent", "=", doctype]],
+			filters=[field_type_filter, ["parent", "=", doctype]] + mandatory_fields_filters,
 		)
 		custom_fields = frappe.get_all(
 			"Custom Field",
 			fields=["label", "name", "fieldname"],
-			filters=[["fieldtype", "not in", invalid_field_types], ["dt", "=", doctype]],
+			filters=[field_type_filter, ["dt", "=", doctype]] + mandatory_fields_filters,
 		)
 		return docfields + custom_fields
 

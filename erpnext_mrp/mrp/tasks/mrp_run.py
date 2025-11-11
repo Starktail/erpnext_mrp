@@ -663,12 +663,18 @@ def _update_ordered_qty():
 	start_date = date.today()
 	end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
+	receiving_date_field = "schedule_date"
+	if settings.po_item_delivery_date_field:
+		receiving_date_field = settings.po_item_delivery_date_field.split("|")[0].strip()
+	
+	receiving_date_expression = f"po_item.`{receiving_date_field}`"
+
 	sql_query = f"""
         SELECT
             po_item.item_code,
             CASE
-                WHEN po_item.schedule_date < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
-                ELSE DATE_FORMAT(po_item.schedule_date, '%%xCW%%v')
+                WHEN {receiving_date_expression} < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
+                ELSE DATE_FORMAT({receiving_date_expression}, '%%xCW%%v')
             END AS calendar_week,
             SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty
         FROM `tabPurchase Order Item` AS po_item
@@ -678,7 +684,7 @@ def _update_ordered_qty():
             AND po.status NOT IN ('Closed', 'Delivered', 'Cancelled')
             AND po.docstatus = 1
             AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
-            AND po_item.schedule_date <= %(end_date)s
+            AND {receiving_date_expression} <= %(end_date)s
         GROUP BY
             po_item.item_code,
             calendar_week;
