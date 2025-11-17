@@ -4,29 +4,27 @@ name: CI
 on:
   push:
     branches:
-      - develop
+      - version-15
   pull_request:
 
 concurrency:
   group: develop-erpnext_mrp-${{ github.event.number }}
   cancel-in-progress: true
 
+env:
+  TEST_AGAINST_FRAPPE_VERSION: v15.88.0
+
+  TEST_AGAINST_ERPNEXT_VERSION: v15.87.1
+
+
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
-    name: Server
+    name: Backend Unit Tests & UI Tests
 
     services:
-      redis-cache:
-        image: redis:alpine
-        ports:
-          - 13000:6379
-      redis-queue:
-        image: redis:alpine
-        ports:
-          - 11000:6379
       mariadb:
         image: mariadb:10.6
         env:
@@ -37,7 +35,7 @@ jobs:
 
     steps:
       - name: Clone
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Find tests
         run: |
@@ -52,8 +50,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 22
           check-latest: true
+
+      - name: Add to Hosts
+        run: |
+          echo "127.0.0.1 test_site" | sudo tee -a /etc/hosts
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -68,7 +70,8 @@ jobs:
         id: yarn-cache-dir-path
         run: 'echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT'
 
-      - uses: actions/cache@v4
+      - name: Cache yarn
+        uses: actions/cache@v3
         id: yarn-cache
         with:
           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
@@ -76,31 +79,66 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-yarn-
 
-      - name: Install MariaDB Client
-        run: sudo apt-get install mariadb-client-10.6
-
-      - name: Setup
-        run: |
-          pip install frappe-bench
-          bench init --skip-redis-config-generation --skip-assets --python "$(which python)" ~/frappe-bench
-          mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
-          mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+      - name: Cache cypress binary
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/Cypress
+          key: ${{ runner.os }}-cypress
 
       - name: Install
-        working-directory: /home/runner/frappe-bench
         run: |
-          bench get-app erpnext_mrp $GITHUB_WORKSPACE
-          bench setup requirements --dev
-          bench new-site --db-root-password root --admin-password admin test_site
-          bench --site test_site install-app erpnext_mrp
-          bench build
-        env:
-          CI: 'Yes'
+          bash ${GITHUB_WORKSPACE}/.github/helper/install.sh
 
-      - name: Run Tests
+      - name: Run Unit Tests
         working-directory: /home/runner/frappe-bench
         run: |
           bench --site test_site set-config allow_tests true
-          bench --site test_site run-tests --app erpnext_mrp
+          bench --site test_site run-tests --app erpnext_mrp --coverage
         env:
           TYPE: server
+
+      - name: Run UI Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          set -x
+          echo "Setting Up Procfile..."
+
+          sed -i 's/^watch:/# watch:/g' Procfile
+          sed -i 's/^schedule:/# schedule:/g' Procfile
+          if [ "$TYPE" == "server" ]; then
+            sed -i 's/^socketio:/# socketio:/g' Procfile;
+            sed -i 's/^redis_socketio:/# redis_socketio:/g' Procfile;
+          fi
+
+          echo "Starting Bench..."
+          export FRAPPE_TUNE_GC=True
+          bench start &> bench_start.log &
+          bench --site test_site run-ui-tests erpnext_mrp --headless -- --record
+
+
+        env:
+          TYPE: server
+          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+
+      - name: Upload coverage data
+        uses: codecov/codecov-action@v3
+        with:
+          name: Backend
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # fail_ci_if_error: true
+          files: /home/runner/frappe-bench/sites/coverage.xml
+          verbose: true
+
+      - name: Upload UI coverage data
+        uses: codecov/codecov-action@v3
+        with:
+          name: Cypress
+          # fail_ci_if_error: true
+          files: /home/runner/frappe-bench/apps/frappe/.cypress-coverage/clover.xml
+          verbose: true
+
+      - name: Show bench output
+        if: ${{ failure() }}
+        run: |
+          cat ~/frappe-bench/bench_start.log
+

@@ -9,6 +9,7 @@ def before_tests():
 	from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
 
 	print("Running before_tests")
+
 	if not frappe.db.a_row_exists("Company"):
 		print("Running setup_complete because company does not exist")
 		current_year = now_datetime().year
@@ -30,6 +31,5 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
-
 	enable_all_roles_and_domains()
 	frappe.db.commit()  # nosemgrep

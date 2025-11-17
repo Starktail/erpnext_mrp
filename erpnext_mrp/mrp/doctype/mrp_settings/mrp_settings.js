@@ -39,7 +39,7 @@ frappe.ui.form.on("MRP Settings", {
 			args: {
 				doctype: "Purchase Order Item",
 				field_type: "Date",
-				mandatory_fields_only: true
+				mandatory_fields_only: true,
 			},
 			callback: function (r) {
 				// Sort the array of objects alphabetically by the label property
