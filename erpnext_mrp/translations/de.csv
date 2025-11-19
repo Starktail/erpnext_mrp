@@ -23,7 +23,7 @@ Is Manufactured,Wird hergestellt
 If this item has an Active BOM it's considered as a Manufactured Item,Wenn dieser Artikel eine aktive Stückliste besitzt gilt er als gefertigter Artikel.
 Item Lead Time Field,Feld für die Artikel-Lieferzeit
 Item Additional Lead Time Field,Feld für zusätzliche Lieferzeit
-The Item field to use as "Lead Time",Das Feld „Artikel“ soll als „Lieferzeit“ verwendet werden.
+The Item field to use as "Lead Time". Int fields only.,Das Feld „Artikel“ soll als „Lieferzeit“ verwendet werden. Nur Integer-Felder.
 An Item field to include in the Lead Time calculation,Ein Artikelfeld, das in die Lieferzeitberechnung einbezogen werden soll
 Purchase Order Item Delivery Date Field,Feld für Lieferdatum der Bestellposition
 A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field.,Ein Feld im Feld „Bestellposition“ das als Lieferdatum bei der Berechnung der Bestellmenge verwendet werden soll. Muss ein Pflichtfeld sein.

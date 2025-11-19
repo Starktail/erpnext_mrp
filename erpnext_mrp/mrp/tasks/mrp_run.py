@@ -42,7 +42,7 @@ def create_mrp_item_entries():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(t_item.`{lead_time_field}`, 0) + IFNULL(t_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(t_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(t_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"t_item.`{lead_time_field}`"
 
@@ -255,7 +255,7 @@ def _update_upstream_forecast_demand():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(child_item.`{lead_time_field}`, 0) + IFNULL(child_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"child_item.`{lead_time_field}`"
 
@@ -515,7 +515,7 @@ def _update_upstream_so_demand():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(child_item.`{lead_time_field}`, 0) + IFNULL(child_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"child_item.`{lead_time_field}`"
 

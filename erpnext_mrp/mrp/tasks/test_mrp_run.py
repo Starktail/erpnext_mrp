@@ -59,6 +59,7 @@ class TestMRPRun(FrappeTestCase):
 		mrp_settings.periods_type = "Calendar Week"
 		mrp_settings.requirement_based_on = "Open Orders + Forecast"
 		mrp_settings.item_lead_time_field = "lead_time_days | Lead Time in days"
+		mrp_settings.item_additional_lead_time_field = ""
 		mrp_settings.save()
 		self.mrp_settings = mrp_settings
 
@@ -244,7 +245,7 @@ class TestMRPRun(FrappeTestCase):
 					"dt": "Item",
 					"fieldname": "custom_additional_lead_time",
 					"label": "Custom Additional Lead Time",
-					"fieldtype": "Int",
+					"fieldtype": "Data",
 					"insert_after": "lead_time_days",
 				}
 			).insert()
@@ -426,6 +427,14 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", so_demand_date)
 		self.assertEqual(mrp_entry.upstream_so_demand, 4)  # Qty of 4, as per BOM
 		# ==============================================================================================================
+
+		# TODO
+		# Test that scheduled_receipts populates correctly on MRP Entries (planned_qty & ordered_qty)
+		# Test that suggested_receipts populates correctly on MRP Entries
+		# Test that suggested_orders populates correctly on MRP Entries
+		# Test that projected_on_hand_inventory populates correctly on MRP Entries
+
+		# Add another demand for parent item (SR04820) with different due date, to test that qtys are aggregated
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
