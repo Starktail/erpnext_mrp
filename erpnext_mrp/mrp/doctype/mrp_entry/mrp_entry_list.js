@@ -17,7 +17,7 @@ frappe.listview_settings["MRP Entry"] = {
 					},
 				});
 			},
-			__("Actions")
+			__("Actions"),
 		);
 	},
 };

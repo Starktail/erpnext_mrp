@@ -71,7 +71,7 @@
    "options": "<p><strong>Condition Examples:</strong></p>\n<pre>doc.default_material_request_type == \"Purchase\"<br>doc.end_of_life &gt;= nowdate()<br>doc.lead_time_days &gt; 7\n</pre>\n"
   },
   {
-   "description": "The Item field to use as \"Lead Time\"",
+   "description": "The Item field to use as \"Lead Time\". Int fields only.",
    "fieldname": "item_lead_time_field",
    "fieldtype": "Select",
    "label": "Item Lead Time Field",
@@ -95,7 +95,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-11 12:32:25.177232",
+ "modified": "2025-11-19 08:25:44.119824",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

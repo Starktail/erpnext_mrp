@@ -42,7 +42,7 @@ def create_mrp_item_entries():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(t_item.`{lead_time_field}`, 0) + IFNULL(t_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(t_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(t_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"t_item.`{lead_time_field}`"
 
@@ -136,7 +136,7 @@ def create_mrp_item_entries():
 	periods = {}
 	for i in range(look_ahead):
 		target_date = today + datetime.timedelta(weeks=i)
-		year, week, _ = target_date.isocalendar()
+		year, week, _unused = target_date.isocalendar()
 		period_str = f"-{year}CW{week:02d}"
 		if period_str not in periods:
 			periods[period_str] = target_date
@@ -199,7 +199,7 @@ def _update_forecast_demand():
 	start_date = date.today()
 	end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
-	sql_query = f"""
+	sql_query = """
         SELECT
             item_code,
             CASE
@@ -255,7 +255,7 @@ def _update_upstream_forecast_demand():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(child_item.`{lead_time_field}`, 0) + IFNULL(child_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"child_item.`{lead_time_field}`"
 
@@ -356,7 +356,7 @@ def _update_reserved_qty():
 
 	# Note: DATE_FORMAT(date, '%%xCW%%v') is used to create the week string, e.g., '2025CW39'.
 	# The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
-	sql_query = f"""
+	sql_query = """
         SELECT
             item_code,
             CASE
@@ -454,7 +454,7 @@ def _update_reserved_qty_for_production():
 	start_date = date.today()
 	end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
-	sql_query = f"""
+	sql_query = """
         SELECT
             wo_item.item_code,
             CASE
@@ -515,7 +515,7 @@ def _update_upstream_so_demand():
 		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
 
 	if additional_lead_time_field:
-		lead_time_expression = f"IFNULL(child_item.`{lead_time_field}`, 0) + IFNULL(child_item.`{additional_lead_time_field}`, 0)"
+		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
 	else:
 		lead_time_expression = f"child_item.`{lead_time_field}`"
 
@@ -605,7 +605,7 @@ def _update_planned_qty():
 	start_date = date.today()
 	end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
-	sql_query = f"""
+	sql_query = """
         SELECT
             production_item,
             CASE
@@ -666,7 +666,7 @@ def _update_ordered_qty():
 	receiving_date_field = "schedule_date"
 	if settings.po_item_delivery_date_field:
 		receiving_date_field = settings.po_item_delivery_date_field.split("|")[0].strip()
-	
+
 	receiving_date_expression = f"po_item.`{receiving_date_field}`"
 
 	sql_query = f"""
@@ -719,7 +719,7 @@ def _update_ordered_qty():
 
 
 def calculate_totals():
-	update_query = f"""
+	update_query = """
         UPDATE `tabMRP Entry`
         SET
             open_orders = COALESCE(reserved_qty, 0) + COALESCE(reserved_qty_for_production, 0) + COALESCE(upstream_so_demand, 0),

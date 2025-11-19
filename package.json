@@ -1,7 +1,8 @@
 {
   "private": true,
   "name": "erpnext-mrp",
-  "version": "0.1.10",
+  "version": "0.1.11",
+  "author": "Starktail (Pty) Ltd <support@starktail.com>",
   "description": "MRP Tools for ERPNext",
   "workspaces": [
     "frontend",
@@ -9,24 +10,24 @@
     "packages/*"
   ],
   "main": "index.js",
+  "devDependencies": {
+    "vitepress": "^2.0.0-alpha.12",
+    "vue": "^3.5.24",
+    "@4tw/cypress-drag-drop": "^2.2.5",
+    "@cypress/code-coverage": "^3",
+    "@testing-library/cypress": "^10",
+    "@testing-library/dom": "8.17.1",
+    "cypress": "^13.1.0",
+    "cypress-real-events": "^1.7.6"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "cd frontend && yarn dev",
     "build": "yarn docs:build && cd frontend && yarn build",
+    "dev": "cd frontend && yarn dev",
     "postinstall": "yarn install-web",
     "install-web": "cd frontend && yarn install",
     "docs:build": "vitepress build docs && ./prepare_help_files.sh",
     "docs:build-gh": "vitepress build docs --outDir docs/.vitepress/dist",
     "docs:dev": "vitepress dev docs --host",
     "docs:preview": "vitepress preview docs"
-  },
-  "keywords": [],
-  "author": "Dirk van der Laarse <dirk@laarse.co.za>",
-  "license": "mit",
-  "devDependencies": {
-    "vitepress": "^2.0.0-alpha.12",
-    "vue": "^3.5.22"
-  },
-  "dependencies": {},
-  "repository": "https://github.com/dvdl16/erpnext_mrp.git"
+  }
 }
