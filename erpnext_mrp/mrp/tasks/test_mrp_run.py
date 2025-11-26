@@ -450,6 +450,8 @@ def create_item(
 	item_group: str,
 	lead_time_days: int,
 	opening_stock: int = 0,
+	safety_stock: int = 0,
+	min_order_qty: int = 0,
 ):
 	if not frappe.db.exists("Item", item_code):
 		item = frappe.new_doc("Item")
@@ -462,6 +464,8 @@ def create_item(
 		item.opening_stock = opening_stock
 		item.valuation_rate = 10
 		item.lead_time_days = lead_time_days
+		item.safety_stock = safety_stock
+		item.min_order_qty = min_order_qty
 		item.append(
 			"item_defaults",
 			{"default_warehouse": "_Test Warehouse - _TC", "company": "_Test Company"},
