@@ -740,12 +740,12 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	item_details_query = """
         SELECT DISTINCT
             mrp.item_code,
-            ir.warehouse_reorder_level,
-            ir.warehouse_reorder_qty,
+            t_item.safety_stock,
+            t_item.min_order_qty,
             id.default_supplier
         FROM `tabMRP Entry` AS mrp
-        LEFT JOIN `tabItem Reorder` AS ir
-            ON mrp.item_code = ir.parent AND ir.material_request_type = 'Purchase' AND ir.idx = 1
+        JOIN `tabItem` AS t_item
+            ON mrp.item_code = t_item.name
         LEFT JOIN `tabItem Default` AS id
             ON mrp.item_code = id.parent AND id.default_supplier IS NOT NULL
     """
@@ -805,8 +805,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 			# Set the re-order details
 			if item_details:
-				entry.reorder_level = item_details.get("warehouse_reorder_level")
-				entry.reorder_quantity = item_details.get("warehouse_reorder_qty")
+				entry.reorder_level = item_details.get("safety_stock")
+				entry.reorder_quantity = item_details.get("min_order_qty")
 
 			# Set the default Supplier
 			if item_details:

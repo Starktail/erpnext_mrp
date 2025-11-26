@@ -49,8 +49,8 @@ Finally, the system calculates the net position and suggests actions.
 - **Suggestions and Projected Stock**: This is the core MRP logic. For each item, the calculation proceeds chronologically, week by week:
     1.  **Beginning Inventory**: The `On Hand Inventory` for the first period is the current actual stock level. For all subsequent periods, it is the `Projected On Hand Inventory` from the previous period.
     2.  **Net Requirements**: The system calculates the total demand for the period based on the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
-    3.  **Shortage Calculation**: It determines if there is a shortage by comparing the on-hand inventory and scheduled receipts against the total demand and the item's re-order level.
-    4.  **Suggested Receipts**: If a shortage exists, the system calculates a `Suggested Receipt`. This value considers the shortage quantity and the item's re-order quantity (MOQ).
+    3.  **Shortage Calculation**: It determines if there is a shortage by comparing the on-hand inventory and scheduled receipts against the total demand and the item's `Safety Stock` (from the Item master).
+    4.  **Suggested Receipts**: If a shortage exists, the system calculates a `Suggested Receipt`. This value considers the shortage quantity and the item's `Min Order Qty` (from the Item master).
     5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
     6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
     7.  **Urgency Flag**: If a suggested order is calculated for a period that is already in the past, the item is flagged as `Urgent`.
@@ -65,8 +65,8 @@ The following are the key fields calculated for each item in each period:
 | `item_code`                     | The item being planned.                                                                                                                                               |
 | `bom_level`                     | The calculated BOM level of the item.                                                                                                                                 |
 | `target_date`                   | The target date for the planning period (week).                                                                                                                       |
-| `reorder_level`                 | The minimum stock level for the item.                                                                                                                                 |
-| `reorder_quantity`              | The minimum order quantity (MOQ) for the item.                                                                                                                        |
+| `reorder_level`                 | The minimum stock level for the item, from the `Safety Stock` field on the Item master.                                                                               |
+| `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                       |
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings. |
 | `is_urgent`                     | A flag indicating if an order for this item is past its required start date.                                                                                          |
 | **Inventory & Demand**          |                                                                                                                                                                       |
