@@ -844,7 +844,7 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 		# Based on lead time, set the suggested order qty for the correct earlier entry
 		urgency_level = 0
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
-			if entry.suggested_receipts and entry.lead_time:
+			if entry.suggested_receipts:
 				weeks_before = math.ceil(entry.lead_time / 7)
 				# If we should have ordered already, flag this entry and set suggested_orders in current period
 				if index - weeks_before < 0:
