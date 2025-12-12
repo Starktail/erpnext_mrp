@@ -2,7 +2,7 @@ MRP Entry,MRP-Eintrag
 BOM Level,Stücklistenebene
 Target Date,Zieldatum
 Reorder Quantity (MOQ),Nachbestellmenge (MOQ)
-Urgent,Dringend
+Urgency Level,Dringlichkeitsstufe
 On Hand Inventory,Vorhandener Bestand
 Stock on Hand (Begin of period),Lagerbestand (Beginn der Periode)
 Open Orders,Offene Bestellungen

@@ -187,7 +187,7 @@ export default {
 					'reorder_quantity',
 					'lead_time',
 					'default_supplier',
-					'is_urgent',
+					'urgency_level',
 					'target_date',
 					'on_hand_inventory',
 					'open_orders',
@@ -267,9 +267,11 @@ export default {
 						reorder_quantity: entry.reorder_quantity,
 						lead_time: entry.lead_time,
 						default_supplier: entry.default_supplier,
-						is_urgent: entry.is_urgent,
+						_urgency_levels: [],
 					}
 				}
+
+				items[entry.item_code]._urgency_levels.push(entry.urgency_level)
 
 				if (!entry.target_date) return
 
@@ -281,6 +283,12 @@ export default {
 				fieldsToPivot.forEach((field) => {
 					items[entry.item_code][`${weekKey}_${field}`] = entry[field]
 				})
+			})
+
+			Object.values(items).forEach((item) => {
+				const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
+				item.urgency_level = positiveUrgencies.length > 0 ? Math.min(...positiveUrgencies) : 0
+				delete item._urgency_levels
 			})
 
 			let item_rows = Object.values(items)
@@ -366,15 +374,15 @@ export default {
 					width: 120,
 				},
 				{
-					field: 'is_urgent',
-					headerName: 'Urgent',
+					field: 'urgency_level',
+					headerName: 'Urgency Level',
 					sortable: true,
 					filter: true,
 					width: 120,
 					cellStyle: { textAlign: 'center' },
 					sort: 'desc',
 					cellRenderer: (params) => {
-						return params.value === 1 ? '⚠️' : ''
+						return params.value !== 0 ? `⚠️ <b>${params.value}</b>` : params.value
 					},
 				},
 			]
@@ -488,8 +496,10 @@ export default {
 			return params.data.name
 		},
 		getRowStyle(params) {
-			if (params.data && params.data.is_urgent === 1) {
+			if (params.data && params.data.urgency_level === 1) {
 				return { background: '#ffdddd' }
+			} else if (params.data && params.data.urgency_level === 2) {
+				return { background: '#eab26eff' }
 			}
 			return null
 		},
