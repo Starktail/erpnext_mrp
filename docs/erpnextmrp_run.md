@@ -66,9 +66,9 @@ The following are the key fields calculated for each item in each period:
 | `bom_level`                     | The calculated BOM level of the item.                                                                                                                                 |
 | `target_date`                   | The target date for the planning period (week).                                                                                                                       |
 | `reorder_level`                 | The minimum stock level for the item, from the `Safety Stock` field on the Item master.                                                                               |
-| `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                       |
-| `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings. |
-| `is_urgent`                     | A flag indicating if an order for this item is past its required start date.                                                                                          |
+| `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                     |
+| `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
+| `urgency_level`                 | A level indicating if the item is: 1. Required and not enough On Order | 2. Enough On Order, but late | 3. Ordered but stock level will be lower than safety stock    |
 | **Inventory & Demand**          |                                                                                                                                                                       |
 | `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
 | `open_orders`                   | Total demand from firm orders (Sales Orders and Work Orders).                                                                                                         |

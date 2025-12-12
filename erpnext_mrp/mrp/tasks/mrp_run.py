@@ -831,24 +831,42 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			# Determine if there is a shortage
 			entry.suggested_receipts = 0
 			shortage = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0) - (entry.reorder_level or 0)
+			shortage_excl_reorder_level = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0)
 			if shortage < 0:
 				shortage *= -1
+				shortage_excl_reorder_level *= -1
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts = math.ceil(shortage / moq) * moq
+				entry.suggested_receipts_excl_reorder_level = math.ceil(shortage_excl_reorder_level / moq) * moq
 
 			entry.projected_on_hand_inventory = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0) + (entry.suggested_receipts or 0)
 
 		# Based on lead time, set the suggested order qty for the correct earlier entry
-		is_urgent = 0
+		urgency_level = 0
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
 			if entry.suggested_receipts and entry.lead_time:
 				weeks_before = math.ceil(entry.lead_time / 7)
-				# If we should have ordered already, flag this entry
+				# If we should have ordered already, flag this entry and set suggested_orders in current period
 				if index - weeks_before < 0:
-					is_urgent = 1
 					mrp_entry_docs[0].suggested_orders = (mrp_entry_docs[0].suggested_orders or 0) + entry.suggested_receipts
+					mrp_entry_docs[0].suggested_orders_excl_reorder_level = (mrp_entry_docs[0].suggested_orders_excl_reorder_level or 0) + entry.suggested_receipts_excl_reorder_level
+				# Else, set suggested_orders in leadtime-adjusted period
 				else:
 					mrp_entry_docs[index - weeks_before].suggested_orders = (mrp_entry_docs[index - weeks_before].suggested_orders or 0) + entry.suggested_receipts
+					mrp_entry_docs[index - weeks_before].suggested_orders_excl_reorder_level = (
+						mrp_entry_docs[index - weeks_before].suggested_orders_excl_reorder_level or 0
+					) + entry.suggested_receipts_excl_reorder_level
 
-			entry.is_urgent = is_urgent
+			entry.urgency_level = urgency_level
 			entry.save()
+
+			# Determine Level of Urgency
+			# Level 1: Required and not enough On Order (excl safety stock)
+			if mrp_entry_docs[0].suggested_orders_excl_reorder_level:
+				mrp_entry_docs[0].urgency_level = 1
+			# Level 2. Enough On Order, but late (excl safety stock)
+			elif mrp_entry_docs[0].suggested_orders_excl_reorder_level == 0 and mrp_entry_docs[0].scheduled_receipts:
+				mrp_entry_docs[0].urgency_level = 2
+			elif mrp_entry_docs[0].suggested_orders:
+				mrp_entry_docs[0].urgency_level = 3
+			mrp_entry_docs[0].save()

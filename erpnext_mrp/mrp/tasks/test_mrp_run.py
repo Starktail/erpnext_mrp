@@ -433,6 +433,7 @@ class TestMRPRun(FrappeTestCase):
 		# Test that suggested_receipts populates correctly on MRP Entries
 		# Test that suggested_orders populates correctly on MRP Entries
 		# Test that projected_on_hand_inventory populates correctly on MRP Entries
+		# Test that correct Urgency Level is calculated on MRP Entries
 
 		# Add another demand for parent item (SR04820) with different due date, to test that qtys are aggregated
 
