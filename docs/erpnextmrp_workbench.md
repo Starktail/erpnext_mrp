@@ -11,7 +11,7 @@ The workbench displays the MRP data in a pivoted grid:
 -   **Rows**: Each row represents a single stock item.
 -   **Columns**: The columns are structured to show both static item information and time-phased planning data.
     -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `Reorder Level`, `Lead Time`, and `Default Supplier`.
-    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). Each weekly column is a group that can be expanded to show detailed fields for that week (`On Hand Inventory`, `Open Orders`, `Suggested Receipts`, etc.) or collapsed to show a single key figure (defaulting to `Suggested Orders`).
+    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). Each weekly column is a group that can be expanded to show detailed fields for that week (`On Hand Inventory`, `Open Sales/Work Orders`, `Suggested Receipts`, etc.) or collapsed to show a single key figure (defaulting to `Suggested Orders`).
 
 ### Key Features and Actions
 

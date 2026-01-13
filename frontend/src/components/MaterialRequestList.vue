@@ -454,7 +454,7 @@ export default {
 		quantityFields() {
 			return [
 				{ value: 'on_hand_inventory', label: 'On Hand Inventory' },
-				{ value: 'open_orders', label: 'Open Orders' },
+				{ value: 'open_orders', label: 'Open Sales/Work Orders' },
 				{ value: 'total_forecast_demand', label: 'Total Forecast Demand' },
 				{ value: 'scheduled_receipts', label: 'Scheduled Receipts' },
 				{ value: 'suggested_receipts', label: 'Suggested Receipts' },
