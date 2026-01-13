@@ -11,9 +11,10 @@
 			<!-- Colour Legend -->
 			<div class="flex items-center gap-4">
 				<div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
-				<div class="flex items-center gap-2 text-sm">
+				<div class="flex items-center gap-2 text-sm cursor-pointer" @click="showUrgencyLegend = true">
 					<div class="w-4 h-4 rounded" style="background-color: #ffdddd"></div>
-					<span class="text-gray-600">Urgent Item</span>
+					<div class="w-4 h-4 rounded" style="background-color: #eab26eff"></div>
+					<span class="text-gray-600 hover:underline">Urgency Legend</span>
 				</div>
 				<div class="flex items-center gap-2 text-sm">
 					<div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
@@ -110,6 +111,33 @@
 				<Button @click="showSuccessDialog = false">Close</Button>
 			</template>
 		</Dialog>
+		<Dialog v-model="showUrgencyLegend" @hide="showUrgencyLegend = false">
+			<template #body-title>
+				<h3 class="text-2xl font-semibold text-ink-gray-9">Urgency Level Legend</h3>
+			</template>
+			<template #body-content>
+				<div>
+					<p>The urgency level highlights items that require attention:</p>
+					<ul class="list-disc list-inside my-4 space-y-2">
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #ffdddd"></div>
+							<span><b>P1 - Critical:</b> Required and not enough quantity on order (excl safety stock).</span>
+						</li>
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #eab26eff"></div>
+							<span><b>P2 - Attention:</b> Enough quantity on order, but scheduled to arrive late (excl safety stock).</span>
+						</li>
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #888888ff"></div>
+							<span><b>P3 - Optional:</b> On order, but the stock level will drop below the safety stock (no row highlight)</span>
+						</li>
+					</ul>
+				</div>
+			</template>
+			<template #actions>
+				<Button @click="showUrgencyLegend = false">Close</Button>
+			</template>
+		</Dialog>
 	</div>
 </template>
 
@@ -117,7 +145,7 @@
 import { nextTick } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 // AG Grid CSS is now imported in main.js
-import { Button, Dialog, Combobox, Checkbox } from 'frappe-ui' // Import Button and Dialog components
+import { Button, Dialog, Combobox, Checkbox, call, toast } from 'frappe-ui'
 
 export default {
 	name: 'MaterialRequestList',
@@ -161,18 +189,10 @@ export default {
 			newlyCreatedDocs: [],
 			showRerunDialog: false,
 			onlyShowSuggested: false,
+			showUrgencyLegend: false,
 		}
 	},
 	resources: {
-		mrp_runner() {
-			return {
-				type: 'run_method',
-				method: 'erpnext_mrp.mrp.tasks.mrp_run.mrp_run',
-				onSuccess: () => {
-					this.showRerunDialog = true
-				},
-			}
-		},
 		mrp_entries() {
 			return {
 				type: 'list',
@@ -382,7 +402,7 @@ export default {
 					cellStyle: { textAlign: 'center' },
 					sort: 'desc',
 					cellRenderer: (params) => {
-						return params.value !== 0 ? `⚠️ <b>${params.value}</b>` : params.value
+						return params.value !== 0 ? `⚠️ <b>P${params.value}</b>` : params.value
 					},
 				},
 			]
@@ -454,7 +474,7 @@ export default {
 		quantityFields() {
 			return [
 				{ value: 'on_hand_inventory', label: 'On Hand Inventory' },
-				{ value: 'open_orders', label: 'Open Orders' },
+				{ value: 'open_orders', label: 'Open Sales/Work Orders' },
 				{ value: 'total_forecast_demand', label: 'Total Forecast Demand' },
 				{ value: 'scheduled_receipts', label: 'Scheduled Receipts' },
 				{ value: 'suggested_receipts', label: 'Suggested Receipts' },
@@ -482,7 +502,10 @@ export default {
 			this.gridApi.setFilterModel(null)
 		},
 		rerunMrp() {
-			this.$resources.mrp_runner.run()
+			call('erpnext_mrp.mrp.tasks.mrp_run.mrp_run').then(() => {
+				toast.success('MRP Calculation Started')
+				this.showRerunDialog = true
+			})
 		},
 		reload() {
 			this.$resources.mrp_entries.reload()

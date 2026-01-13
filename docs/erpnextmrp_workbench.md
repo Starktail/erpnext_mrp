@@ -11,7 +11,7 @@ The workbench displays the MRP data in a pivoted grid:
 -   **Rows**: Each row represents a single stock item.
 -   **Columns**: The columns are structured to show both static item information and time-phased planning data.
     -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `Reorder Level`, `Lead Time`, and `Default Supplier`.
-    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). Each weekly column is a group that can be expanded to show detailed fields for that week (`On Hand Inventory`, `Open Orders`, `Suggested Receipts`, etc.) or collapsed to show a single key figure (defaulting to `Suggested Orders`).
+    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). Each weekly column is a group that can be expanded to show detailed fields for that week (`On Hand Inventory`, `Open Sales/Work Orders`, `Suggested Receipts`, etc.) or collapsed to show a single key figure (defaulting to `Suggested Orders`).
 
 ### Key Features and Actions
 
@@ -23,7 +23,9 @@ The workbench includes several features to help you analyze and manage your mate
 -   **Only show items with suggested orders**: A checkbox that filters the grid to display only those items that have a `Suggested Order` quantity greater than zero in at least one of the weekly time buckets.
 -   **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns when they are collapsed. This is useful for quickly scanning key metrics like `Suggested Orders` or `Projected On Hand Inventory` across the timeline.
 -   **Visual Cues**: The grid uses color coding to draw attention to important items:
-    -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates an **Urgent Item**. This means a suggested order for this item is in a past time bucket, requiring immediate attention.
+    -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates a **P1 - Critical** urgent item. This means the item is required and there is not enough quantity on order.
+    -   <span style="background-color: #eab26eff;">Orange Highlight</span>: Indicates a **P2 - Attention** urgent item. This means there is enough quantity on order, but it's scheduled to arrive late.
+    -   **P3 - Optional** urgent items (ordered but stock will be below safety stock) do not have a specific row highlight but are indicated by the `Urgency Level` column.
     -   <span style="background-color: #ddeeff;">Blue Highlight</span>: Indicates a cell with a **Suggested Order** greater than zero, highlighting the need to place a purchase or work order.
 -   **Create Material Request**: This is the primary action on the workbench.
     1.  **Select Rows**: Use the checkboxes to select one or more item rows that have suggested orders.
