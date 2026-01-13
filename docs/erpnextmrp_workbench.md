@@ -23,7 +23,9 @@ The workbench includes several features to help you analyze and manage your mate
 -   **Only show items with suggested orders**: A checkbox that filters the grid to display only those items that have a `Suggested Order` quantity greater than zero in at least one of the weekly time buckets.
 -   **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns when they are collapsed. This is useful for quickly scanning key metrics like `Suggested Orders` or `Projected On Hand Inventory` across the timeline.
 -   **Visual Cues**: The grid uses color coding to draw attention to important items:
-    -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates an **Urgent Item**. This means a suggested order for this item is in a past time bucket, requiring immediate attention.
+    -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates a **Level 1 Urgent Item**. This means the item is required and there is not enough quantity on order.
+    -   <span style="background-color: #eab26eff;">Orange Highlight</span>: Indicates a **Level 2 Urgent Item**. This means there is enough quantity on order, but it's scheduled to arrive late.
+    -   Level 3 Urgent Items (ordered but stock will be below safety stock) do not have a specific row highlight but are indicated by the `Urgency Level` column.
     -   <span style="background-color: #ddeeff;">Blue Highlight</span>: Indicates a cell with a **Suggested Order** greater than zero, highlighting the need to place a purchase or work order.
 -   **Create Material Request**: This is the primary action on the workbench.
     1.  **Select Rows**: Use the checkboxes to select one or more item rows that have suggested orders.
