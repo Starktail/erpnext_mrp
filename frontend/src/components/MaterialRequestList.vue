@@ -121,15 +121,15 @@
 					<ul class="list-disc list-inside my-4 space-y-2">
 						<li class="flex items-start gap-2">
 							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #ffdddd"></div>
-							<span><b>Level 1:</b> Required and not enough quantity on order (excl safety stock).</span>
+							<span><b>P1 - Critical:</b> Required and not enough quantity on order (excl safety stock).</span>
 						</li>
 						<li class="flex items-start gap-2">
 							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #eab26eff"></div>
-							<span><b>Level 2:</b> Enough quantity on order, but scheduled to arrive late (excl safety stock).</span>
+							<span><b>P2 - Attention:</b> Enough quantity on order, but scheduled to arrive late (excl safety stock).</span>
 						</li>
 						<li class="flex items-start gap-2">
 							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #888888ff"></div>
-							<span><b>Level 3:</b> On order, but the stock level will drop below the safety stock (no row highlight)</span>
+							<span><b>P3 - Optional:</b> On order, but the stock level will drop below the safety stock (no row highlight)</span>
 						</li>
 					</ul>
 				</div>
@@ -402,7 +402,7 @@ export default {
 					cellStyle: { textAlign: 'center' },
 					sort: 'desc',
 					cellRenderer: (params) => {
-						return params.value !== 0 ? `⚠️ <b>${params.value}</b>` : params.value
+						return params.value !== 0 ? `⚠️ <b>P${params.value}</b>` : params.value
 					},
 				},
 			]
