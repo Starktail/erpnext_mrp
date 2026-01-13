@@ -11,9 +11,10 @@
 			<!-- Colour Legend -->
 			<div class="flex items-center gap-4">
 				<div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
-				<div class="flex items-center gap-2 text-sm">
+				<div class="flex items-center gap-2 text-sm cursor-pointer" @click="showUrgencyLegend = true">
 					<div class="w-4 h-4 rounded" style="background-color: #ffdddd"></div>
-					<span class="text-gray-600">Urgent Item</span>
+					<div class="w-4 h-4 rounded" style="background-color: #eab26eff"></div>
+					<span class="text-gray-600 hover:underline">Urgency Legend</span>
 				</div>
 				<div class="flex items-center gap-2 text-sm">
 					<div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
@@ -110,6 +111,33 @@
 				<Button @click="showSuccessDialog = false">Close</Button>
 			</template>
 		</Dialog>
+		<Dialog v-model="showUrgencyLegend" @hide="showUrgencyLegend = false">
+			<template #body-title>
+				<h3 class="text-2xl font-semibold text-ink-gray-9">Urgency Level Legend</h3>
+			</template>
+			<template #body-content>
+				<div>
+					<p>The urgency level highlights items that require attention:</p>
+					<ul class="list-disc list-inside my-4 space-y-2">
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #ffdddd"></div>
+							<span><b>Level 1:</b> Required and not enough quantity on order (excl safety stock).</span>
+						</li>
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #eab26eff"></div>
+							<span><b>Level 2:</b> Enough quantity on order, but scheduled to arrive late (excl safety stock).</span>
+						</li>
+						<li class="flex items-start gap-2">
+							<div class="w-4 h-4 rounded mt-1 flex-shrink-0" style="background-color: #888888ff"></div>
+							<span><b>Level 3:</b> On order, but the stock level will drop below the safety stock (no row highlight)</span>
+						</li>
+					</ul>
+				</div>
+			</template>
+			<template #actions>
+				<Button @click="showUrgencyLegend = false">Close</Button>
+			</template>
+		</Dialog>
 	</div>
 </template>
 
@@ -161,6 +189,7 @@ export default {
 			newlyCreatedDocs: [],
 			showRerunDialog: false,
 			onlyShowSuggested: false,
+			showUrgencyLegend: false,
 		}
 	},
 	resources: {
