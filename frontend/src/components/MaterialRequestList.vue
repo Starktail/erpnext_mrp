@@ -117,7 +117,7 @@
 import { nextTick } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 // AG Grid CSS is now imported in main.js
-import { Button, Dialog, Combobox, Checkbox } from 'frappe-ui' // Import Button and Dialog components
+import { Button, Dialog, Combobox, Checkbox, call, toast } from 'frappe-ui'
 
 export default {
 	name: 'MaterialRequestList',
@@ -164,15 +164,6 @@ export default {
 		}
 	},
 	resources: {
-		mrp_runner() {
-			return {
-				type: 'run_method',
-				method: 'erpnext_mrp.mrp.tasks.mrp_run.mrp_run',
-				onSuccess: () => {
-					this.showRerunDialog = true
-				},
-			}
-		},
 		mrp_entries() {
 			return {
 				type: 'list',
@@ -482,7 +473,10 @@ export default {
 			this.gridApi.setFilterModel(null)
 		},
 		rerunMrp() {
-			this.$resources.mrp_runner.run()
+			call('erpnext_mrp.mrp.tasks.mrp_run.mrp_run').then(() => {
+				toast.success('MRP Calculation Started')
+				this.showRerunDialog = true
+			})
 		},
 		reload() {
 			this.$resources.mrp_entries.reload()
