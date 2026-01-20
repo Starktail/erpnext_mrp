@@ -21,4 +21,18 @@ app.use(router)
 app.use(resourcesPlugin)
 
 app.component('Button', Button)
-app.mount('#app')
+
+if (import.meta.env.DEV) {
+	frappeRequest({ url: '/api/method/erpnext_mrp.www.erpnext_mrp.get_context_for_dev' }).then((values) => {
+		for (let key in values) {
+			window[key] = values[key]
+		}
+		app.mount('#app')
+	})
+} else {
+	// In production, jinjaBootData likely sets window.frappe_boot
+	if (window.frappe_boot) {
+		window.sysdefaults = window.frappe_boot.sysdefaults
+	}
+	app.mount('#app')
+}

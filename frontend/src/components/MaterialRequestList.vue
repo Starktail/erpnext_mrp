@@ -146,6 +146,7 @@ import { nextTick } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 // AG Grid CSS is now imported in main.js
 import { Button, Dialog, Combobox, Checkbox, call, toast } from 'frappe-ui'
+import { formatCurrency } from '../utils/numberFormat'
 
 export default {
 	name: 'MaterialRequestList',
@@ -451,7 +452,7 @@ export default {
 					sortable: true,
 					filter: true,
 					width: 120,
-					cellStyle: { textAlign: 'right' },
+					cellStyle: qField.cellStyle || { textAlign: 'right' },
 					headerClass: 'ag-right-aligned-header',
 				}))
 
@@ -464,12 +465,9 @@ export default {
 					sortable: true,
 					filter: true,
 					width: 120,
-					cellStyle: { textAlign: 'right' },
+					cellStyle: closedField.cellStyle || { textAlign: 'right' },
+					valueFormatter: closedField.valueFormatter,
 					headerClass: 'ag-right-aligned-header',
-				}
-
-				if (closedField.value === 'suggested_orders') {
-					closedChild.cellStyle = (params) => (params.value > 0 ? { background: '#ddeeff', textAlign: 'right' } : { textAlign: 'right' })
 				}
 
 				return {
@@ -491,9 +489,14 @@ export default {
 				{
 					value: 'suggested_orders',
 					label: 'Suggested Orders',
-					cellStyle: (params) => (params.value > 0 ? { background: '#ddeeff' } : null),
+					cellStyle: (params) => (params.value > 0 ? { background: '#ddeeff', textAlign: 'right' } : { textAlign: 'right' }),
 				},
-				{ value: 'suggested_orders_value', label: 'Suggested Orders Value' },
+				{
+					value: 'suggested_orders_value',
+					label: 'Suggested Orders Value',
+					cellStyle: { textAlign: 'right' },
+					valueFormatter: (params) => this.formatCurrency(params.value),
+				},
 				{ value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
 			]
 		},
@@ -502,6 +505,11 @@ export default {
 		},
 	},
 	methods: {
+		formatCurrency(value) {
+			if (value === null || value === undefined) return ''
+			const currency = window.sysdefaults?.currency
+			return formatCurrency(value, null, currency)
+		},
 		exportToCsv() {
 			this.gridApi.exportDataAsCsv({ allColumns: true })
 		},
