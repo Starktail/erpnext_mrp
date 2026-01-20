@@ -215,6 +215,7 @@ export default {
 					'scheduled_receipts',
 					'suggested_receipts',
 					'suggested_orders',
+					'suggested_orders_value',
 					'projected_on_hand_inventory',
 				],
 				orderBy: 'creation desc',
@@ -298,7 +299,16 @@ export default {
 				const [year, week] = this.getWeekNumber(new Date(entry.target_date))
 				const weekKey = `${year}-W${String(week).padStart(2, '0')}`
 
-				const fieldsToPivot = ['on_hand_inventory', 'open_orders', 'total_forecast_demand', 'scheduled_receipts', 'suggested_receipts', 'suggested_orders', 'projected_on_hand_inventory']
+				const fieldsToPivot = [
+					'on_hand_inventory',
+					'open_orders',
+					'total_forecast_demand',
+					'scheduled_receipts',
+					'suggested_receipts',
+					'suggested_orders',
+					'suggested_orders_value',
+					'projected_on_hand_inventory',
+				]
 
 				fieldsToPivot.forEach((field) => {
 					items[entry.item_code][`${weekKey}_${field}`] = entry[field]
@@ -483,6 +493,7 @@ export default {
 					label: 'Suggested Orders',
 					cellStyle: (params) => (params.value > 0 ? { background: '#ddeeff' } : null),
 				},
+				{ value: 'suggested_orders_value', label: 'Suggested Orders Value' },
 				{ value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
 			]
 		},

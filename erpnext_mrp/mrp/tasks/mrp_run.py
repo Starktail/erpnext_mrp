@@ -6,6 +6,7 @@ from datetime import date
 import frappe
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
+from pypika import Order
 
 from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
 
@@ -742,6 +743,7 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
             mrp.item_code,
             t_item.safety_stock,
             t_item.min_order_qty,
+			t_item.valuation_rate as fall_back_valuation_rate,
             id.default_supplier
         FROM `tabMRP Entry` AS mrp
         JOIN `tabItem` AS t_item
@@ -791,9 +793,24 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 	item_details_map = {item["item_code"]: item for item in item_batch}
 
+	item_prices = _get_item_prices(item_codes)
+
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
+
+		# Check for a buying price list first
+		price = item_prices.get(item_code)
+		if not price:
+			# Get valuation rate from stock levels (Bin)
+			item_stock_levels = [sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0]
+			valuation_rate = 0
+			if item_stock_levels:
+				valuation_rate = sum(item_stock_levels) / len(item_stock_levels)
+			if valuation_rate:
+				price = valuation_rate
+			else:
+				price = item_details.get("fall_back_valuation_rate")
 
 		# Set current stock level as starting stock on hand
 		mrp_entry_docs[0].on_hand_inventory = sum([stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code])
@@ -802,7 +819,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
 				entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
-
 			# Set the re-order details
 			if item_details:
 				entry.reorder_level = item_details.get("safety_stock")
@@ -870,3 +886,32 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			elif mrp_entry_docs[0].suggested_orders:
 				mrp_entry_docs[0].urgency_level = 3
 			mrp_entry_docs[0].save()
+
+		# Now that all suggested_orders have been calculated, calculate their value
+		if price and price > 0:
+			for entry in mrp_entry_docs:
+				if entry.suggested_orders:
+					new_value = entry.suggested_orders * price
+					if entry.suggested_orders_value != new_value:
+						entry.suggested_orders_value = new_value
+						entry.save()
+
+
+def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
+	today = date.today()
+	ItemPrice = frappe.qb.DocType("Item Price")
+
+	item_prices_docs = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.item_code, ItemPrice.price_list_rate, ItemPrice.creation)
+		.where((ItemPrice.item_code.isin(item_codes)) & (ItemPrice.buying == 1) & (ItemPrice.valid_from <= today) & ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull())))
+		.orderby(ItemPrice.creation, order=Order.desc)
+		.run(as_dict=True)
+	)
+
+	item_prices = {}
+	for d in item_prices_docs:
+		if d.item_code not in item_prices:
+			item_prices[d.item_code] = d.price_list_rate
+
+	return item_prices

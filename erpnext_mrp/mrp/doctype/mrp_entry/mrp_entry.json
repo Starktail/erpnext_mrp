@@ -35,9 +35,13 @@
   "ordered_qty",
   "section_break_sgyw",
   "suggested_receipts",
-  "suggested_receipts_excl_reorder_level",
   "suggested_orders",
+  "column_break_lldg",
+  "suggested_receipts_excl_reorder_level",
   "suggested_orders_excl_reorder_level",
+  "section_break_dfyi",
+  "suggested_orders_value",
+  "suggested_orders_value_payable",
   "section_break_gruc",
   "projected_on_hand_inventory"
  ],
@@ -242,12 +246,32 @@
    "fieldname": "suggested_orders_excl_reorder_level",
    "fieldtype": "Float",
    "label": "Suggested Orders (Excl Reorder Level)"
+  },
+  {
+   "fieldname": "column_break_lldg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_dfyi",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Currency Value of Suggested Orders",
+   "fieldname": "suggested_orders_value",
+   "fieldtype": "Currency",
+   "label": "Suggested Orders Value"
+  },
+  {
+   "description": "Time-adjusted 'Suggested Orders Value Payable' (Takes payment terms into account)",
+   "fieldname": "suggested_orders_value_payable",
+   "fieldtype": "Currency",
+   "label": "Suggested Orders Value Payable"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-12-12 11:10:30.575981",
+ "modified": "2026-01-20 11:49:00.890988",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
