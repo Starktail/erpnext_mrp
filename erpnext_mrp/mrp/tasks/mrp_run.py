@@ -4,7 +4,7 @@ import math
 from datetime import date
 
 import frappe
-from erpnext.controllers.accounts_controller import get_payment_terms
+from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
 from frappe.utils import add_days, getdate
@@ -739,13 +739,34 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	# First row contains headers, second row contains data
 	stock_levels = stock_level_report[1]
 
+	settings = frappe.get_cached_doc("MRP Settings")
+	requirement_based_on = settings.requirement_based_on
+
+	lead_time_field = "lead_time_days"
+	if settings.item_lead_time_field:
+		lead_time_field = settings.item_lead_time_field.split("|")[0].strip()
+
+	additional_lead_time_field = None
+	if settings.item_additional_lead_time_field:
+		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
+
+	if additional_lead_time_field:
+		lead_time_expression = f"COALESCE(t_item.`{lead_time_field}`, 0)"
+		additional_lead_time_expression = f"COALESCE(CAST(NULLIF(t_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
+	else:
+		lead_time_expression = f"t_item.`{lead_time_field}`"
+		additional_lead_time_expression = "0"
+
 	# Get item details in a single query
-	item_details_query = """
+	item_details_query = f"""
         SELECT DISTINCT
             mrp.item_code,
             t_item.safety_stock,
             t_item.min_order_qty,
 			t_item.valuation_rate as fall_back_valuation_rate,
+            COALESCE(t_item.`{lead_time_field}`, 0) as primary_lead_time,
+            {lead_time_expression} AS primary_lead_time,
+			{additional_lead_time_expression} AS additional_lead_time,
             id.default_supplier
         FROM `tabMRP Entry` AS mrp
         JOIN `tabItem` AS t_item
@@ -754,9 +775,6 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
             ON mrp.item_code = id.parent AND id.default_supplier IS NOT NULL
     """
 	item_details_list = frappe.db.sql(item_details_query, as_dict=True)
-
-	settings = frappe.get_cached_doc("MRP Settings")
-	requirement_based_on = settings.requirement_based_on
 
 	# Process items in batches
 	batch_size = 1000
@@ -802,6 +820,12 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 	supplier_payment_terms = {}
 	if suppliers:
 		supplier_payment_terms = {s.name: s.payment_terms for s in frappe.get_all("Supplier", filters={"name": ("in", suppliers)}, fields=["name", "payment_terms"])}
+
+	# Get Payment Terms details for custom due dates
+	payment_term_details = {}
+	all_payment_terms = frappe.get_all("Payment Term", fields=["name", "custom_due_date"])
+	for pt in all_payment_terms:
+		payment_term_details[pt.name] = pt
 
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
@@ -915,16 +939,34 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			entry_map = {e.name: e for e in mrp_entry_docs}
 			for entry in mrp_entry_docs:
 				if entry.suggested_orders_value:
-					# Invoice Date is when items arrive (Order Date + Lead Time)
-					invoice_date = add_days(entry.target_date, entry.lead_time or 0)
 					schedule = get_payment_terms(
 						payment_terms_template,
-						posting_date=invoice_date,
+						posting_date=entry.target_date,
 						grand_total=entry.suggested_orders_value,
 						base_grand_total=entry.suggested_orders_value,
 					)
 					if schedule:
 						for term in schedule:
+							# Determine the base date for due date calculation
+							base_date = None
+							payment_term_name = term.get("payment_term")
+							if payment_term_name:
+								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get("custom_due_date")
+
+								if custom_due_date_type == "Order date":
+									base_date = entry.target_date
+								elif custom_due_date_type == "Shipment date":
+									base_date = add_days(entry.target_date, item_details.get("primary_lead_time") or 0)
+								elif custom_due_date_type == "Arrival date":
+									# Arrival Date Order Date (Order + Total Lead Time)
+									total_lead_time = (item_details.get("primary_lead_time") or 0) + (item_details.get("additional_lead_time") or 0)
+									base_date = add_days(entry.target_date, total_lead_time)
+								else:
+									base_date = entry.target_date
+
+							if base_date:
+								term.due_date = get_due_date(term, posting_date=base_date)
+
 							due_date = term.get("due_date")
 							payment_amount = term.get("payment_amount")
 							if due_date and payment_amount:

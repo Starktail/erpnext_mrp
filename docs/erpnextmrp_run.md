@@ -57,6 +57,11 @@ Finally, the system calculates the net position and suggests actions.
 - **Cash Requirements**: Finally, the system projects the financial impact of the plan.
     - **Order Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
     - **Payable Value**: Projects the cash outflow based on the default Supplier's **Payment Terms**. The system calculates the due date (assuming the invoice is dated upon receipt of goods) and distributes the payable amount to the corresponding weeks.
+    - **Custom Due Dates**: For more precise cash planning, the system supports dynamic due dates on the `Payment Term` doctype. This allows you to split payments based on milestones:
+        - **Order date**: The payment is calculated relative to when the `Suggested Order` is placed.
+        - **Shipment date**: The payment is calculated relative to the shipment date (Order date + Item's primary lead time).
+        - **Arrival date**: The payment is calculated relative to the arrival date (Order date + Item's total lead time).
+        - If no custom due date is set, the system defaults to the **Arrival date**.
 
 ## MRP Entry Fields
 

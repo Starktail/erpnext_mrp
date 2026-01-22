@@ -251,7 +251,17 @@ fixtures = [
 				("MRP Manager", "MRP User"),
 			]
 		],
-	}
+	},
+	{
+		"dt": "Custom Field",
+		"filters": [
+			[
+				"name",
+				"in",
+				("Payment Term-custom_due_date"),
+			]
+		],
+	},
 ]
 
 standard_help_items = [
