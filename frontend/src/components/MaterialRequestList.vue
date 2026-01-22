@@ -381,7 +381,7 @@ export default {
 				},
 				{
 					field: 'reorder_quantity',
-					headerName: 'Re-order Quantity',
+					headerName: 'Safety Stock',
 					sortable: true,
 					filter: true,
 					width: 110,
