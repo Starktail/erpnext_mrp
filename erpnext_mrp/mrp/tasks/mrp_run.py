@@ -4,8 +4,10 @@ import math
 from datetime import date
 
 import frappe
+from erpnext.controllers.accounts_controller import get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
+from frappe.utils import add_days, getdate
 from pypika import Order
 
 from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
@@ -795,6 +797,12 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 	item_prices = _get_item_prices(item_codes)
 
+	# Get supplier payment terms
+	suppliers = list(set(item["default_supplier"] for item in item_batch if item.get("default_supplier")))
+	supplier_payment_terms = {}
+	if suppliers:
+		supplier_payment_terms = {s.name: s.payment_terms for s in frappe.get_all("Supplier", filters={"name": ("in", suppliers)}, fields=["name", "payment_terms"])}
+
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
@@ -816,6 +824,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 		mrp_entry_docs[0].on_hand_inventory = sum([stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code])
 
 		for index, entry in enumerate(mrp_entry_docs):
+			# Initialize payable value
+			# entry.suggested_orders_value_payable = 0
 			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
 				entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
@@ -896,6 +906,36 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 						entry.suggested_orders_value = new_value
 						entry.save()
 
+		# Calculate Cash Requirement (Payable Value)
+		supplier_name = item_details.get("default_supplier")
+		payment_terms_template = supplier_payment_terms.get(supplier_name) if supplier_name else None
+
+		if supplier_name and payment_terms_template:
+			# Map to quickly find entry by name
+			entry_map = {e.name: e for e in mrp_entry_docs}
+			for entry in mrp_entry_docs:
+				if entry.suggested_orders_value:
+					# Invoice Date is when items arrive (Order Date + Lead Time)
+					invoice_date = add_days(entry.target_date, entry.lead_time or 0)
+					schedule = get_payment_terms(
+						payment_terms_template,
+						posting_date=invoice_date,
+						grand_total=entry.suggested_orders_value,
+						base_grand_total=entry.suggested_orders_value,
+					)
+					if schedule:
+						for term in schedule:
+							due_date = term.get("due_date")
+							payment_amount = term.get("payment_amount")
+							if due_date and payment_amount:
+								# Find target entry CW
+								year, week, _day = getdate(due_date).isocalendar()
+								target_name = f"{item_code}-{year}CW{week:02d}"
+								target_entry = entry_map.get(target_name)
+								if target_entry:
+									target_entry.suggested_orders_value_payable = (target_entry.suggested_orders_value_payable or 0) + payment_amount
+									target_entry.save()
+
 
 def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
 	today = date.today()
@@ -906,8 +946,10 @@ def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
 		.select(ItemPrice.item_code, ItemPrice.price_list_rate, ItemPrice.creation)
 		.where((ItemPrice.item_code.isin(item_codes)) & (ItemPrice.buying == 1) & (ItemPrice.valid_from <= today) & ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull())))
 		.orderby(ItemPrice.creation, order=Order.desc)
-		.run(as_dict=True)
+		# .run(as_dict=True)
 	)
+
+	item_prices_docs = item_prices_docs.run(as_dict=True)
 
 	item_prices = {}
 	for d in item_prices_docs:

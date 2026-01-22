@@ -13,6 +13,7 @@ By analyzing demand from sales orders and forecasts, and considering current inv
 - **Interactive MRP Workbench**: A modern, grid-based interface to visualize the complete MRP plan, identify potential shortages, and take action.
 - **Automated Material Request Generation**: Select suggested orders directly from the workbench to create Purchase-type Material Requests, grouped by supplier.
 - **Urgent Item Highlighting**: The system automatically flags orders that need immediate attention because their lead time extends into the past.
+- **Cash Flow Projection**: Estimates future cash requirements by calculating the payable value of suggested orders, factoring in supplier payment terms and lead times.
 
 
 ## Under the Hood

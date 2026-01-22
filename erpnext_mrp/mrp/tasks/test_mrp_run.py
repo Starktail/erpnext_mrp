@@ -30,6 +30,7 @@ class TestMRPRun(FrappeTestCase):
 		frappe.db.delete("Sales Order")
 		frappe.db.delete("Purchase Order")
 		frappe.db.delete("Work Order")
+		frappe.db.delete("Item Price")
 
 		# Load and create test items
 		with open(test_data_file_items) as f:
@@ -63,9 +64,18 @@ class TestMRPRun(FrappeTestCase):
 		mrp_settings.save()
 		self.mrp_settings = mrp_settings
 
+		# Create Payment Terms
+		create_payment_terms_templates()
+
 	def tearDown(self):
 		if frappe.db.exists("Custom Field", "Item-custom_additional_lead_time"):
 			frappe.delete_doc("Custom Field", "Item-custom_additional_lead_time", force=True)
+
+		# Reset MRP Settings item_condition
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = ""
+		mrp_settings.save()
+
 		super().tearDown()
 
 	def test_create_mrp_item_entries(self, mock_date):
@@ -92,12 +102,12 @@ class TestMRPRun(FrappeTestCase):
 			order_by="target_date asc",
 		)
 
-		# Expect 10 items as per erpnext_mrp/tests/test_mrp_data_items.json
+		# Expect 11 items as per erpnext_mrp/tests/test_mrp_data_items.json
 		unique_items = set([entry.item_code for entry in all_mrp_entries])
-		self.assertEqual(len(unique_items), 10)
+		self.assertEqual(len(unique_items), 11)
 
-		# Expect 110 MRP Entry records (10 items x 11 weeks look-ahead)
-		self.assertEqual(len(all_mrp_entries), 110)
+		# Expect 121 MRP Entry records (11 items x 11 weeks look-ahead)
+		self.assertEqual(len(all_mrp_entries), 121)
 
 		# Expect first MRP Entry record should be for current calendar week, in format [item]-[year]CW[calendar week], e.g. AAA-2025CW02
 		calendar_date = test_start_day.isocalendar()
@@ -352,7 +362,7 @@ class TestMRPRun(FrappeTestCase):
 
 		# Create Sales Order due ~70 days (compound lead time for our test item) from now
 		final_item_so_date = add_to_date(test_start_day, days=70)
-		create_sales_order(item_code="SR04820", qty=1, delivery_date=final_item_so_date)
+		create_sales_order(item_code="SR04820", qty=1, delivery_date=final_item_so_date, transaction_date=test_start_day)
 
 		create_mrp_item_entries()
 		process_mrp_item_entries(enqueue=False)
@@ -437,6 +447,164 @@ class TestMRPRun(FrappeTestCase):
 
 		# Add another demand for parent item (SR04820) with different due date, to test that qtys are aggregated
 
+	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable(self, mock_date):
+		"""
+		Test that MRP Entry record has correct Suggested Orders Value Payable.
+		Run only for a single item to keep it simple.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# Set MRP Settings item_condition
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		# Set up a default Supplier and Payment Term
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "_Test 0 days after invoice")
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		# Set up an Item Price
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list_rate = 2
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		# Create Sales Order due ~21 days (compound lead time for our test item) from now
+		final_item_so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(item_code="SRZ11111", qty=10, delivery_date=final_item_so_date, transaction_date=test_start_day)
+
+		# Run MRP
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Expect a Reserved Qty value for the "SRZ11111" in the correct period
+		mrp_entry = get_mrp_entry_by_item_week("SRZ11111", final_item_so_date)
+		self.assertEqual(mrp_entry.reserved_qty, 10)
+
+		# Expect a Suggested Orders of the same amount as the order (this item has no lead times/min order qty)
+		self.assertEqual(mrp_entry.suggested_orders, 10)
+
+		# Expect a Suggested Orders Value
+		self.assertEqual(mrp_entry.suggested_orders_value, 20)
+
+		# Expect a Suggested Orders Value Payable
+		# We used a Payment Terms Template with 0 days, so paybale amount should fall in the same period
+		self.assertEqual(mrp_entry.suggested_orders_value_payable, 20)
+
+	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_14_days(self, mock_date):
+		"""
+		Test that MRP Entry record has correct Suggested Orders Value Payable for a Payment Term with > 0 days
+		Run only for a single item to keep it simple.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# Set MRP Settings item_condition
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		# Set up a default Supplier and 14-days Payment Term
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "_Test 14 days after invoice")
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		# Set up an Item Price
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list_rate = 2
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		# Create Sales Order due ~21 days (compound lead time for our test item) from now
+		final_item_so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(item_code="SRZ11111", qty=10, delivery_date=final_item_so_date, transaction_date=test_start_day)
+
+		# Run MRP
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Expect a Reserved Qty value for the "SRZ11111" in the correct period
+		mrp_entry_of_so = get_mrp_entry_by_item_week("SRZ11111", final_item_so_date)
+		self.assertEqual(mrp_entry_of_so.reserved_qty, 10)
+
+		# Expect a Suggested Orders Value Payable for "SRZ11111"
+		# We used a Payment Terms Template with 14 days, so paybale amount should fall in a period 14 days later
+		item_payable_date = add_to_date(final_item_so_date, days=14)
+		mrp_entry_of_payable = get_mrp_entry_by_item_week("SRZ11111", item_payable_date)
+		self.assertEqual(mrp_entry_of_payable.suggested_orders_value_payable, 20)
+
+	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_split_terms(self, mock_date):
+		"""
+		Test that MRP Entry record has correct Suggested Orders Value Payable for a Payment Term Template with split terms
+		Run only for a single item to keep it simple.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# Set MRP Settings item_condition
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		# Set up a default Supplier and 14-days Payment Term
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "_Test Split 0 and 14 days after invoice")
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		# Set up an Item Price
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list_rate = 2
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		# Create Sales Order due ~21 days (compound lead time for our test item) from now
+		final_item_so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(item_code="SRZ11111", qty=10, delivery_date=final_item_so_date, transaction_date=test_start_day)
+
+		# Run MRP
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Expect a Reserved Qty value for the "SRZ11111" in the correct period
+		mrp_entry_of_so = get_mrp_entry_by_item_week("SRZ11111", final_item_so_date)
+		self.assertEqual(mrp_entry_of_so.reserved_qty, 10)
+
+		# Expect a Suggested Orders Value Payable for "SRZ11111"
+		# We used a Payment Terms Template with two terms, 50% at 0 days, and 50% @ 14 days,
+		# so paybale amounts should be split in current period and in a period 14 days later
+		item_payable_date_first_payment = final_item_so_date
+		item_payable_date_second_payment = add_to_date(final_item_so_date, days=14)
+		mrp_entry_of_payable_first_payment = get_mrp_entry_by_item_week("SRZ11111", item_payable_date_first_payment)
+		self.assertEqual(mrp_entry_of_payable_first_payment.suggested_orders_value_payable, 10)
+		mrp_entry_of_payable_second_payment = get_mrp_entry_by_item_week("SRZ11111", item_payable_date_second_payment)
+		self.assertEqual(mrp_entry_of_payable_second_payment.suggested_orders_value_payable, 10)
+
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
 	isodate = demand_date.isocalendar()
@@ -518,7 +686,7 @@ def create_mrp_forecast(mrp_forecast: dict):
 	return forecast
 
 
-def create_sales_order(item_code: str, qty: int, delivery_date: datetime.datetime):
+def create_sales_order(item_code: str, qty: int, delivery_date: datetime.datetime, transaction_date: datetime.datetime):
 	so = frappe.new_doc("Sales Order")
 	so.set_warehouse = ""
 	so.company = "_Test Company"
@@ -539,8 +707,75 @@ def create_sales_order(item_code: str, qty: int, delivery_date: datetime.datetim
 	)
 
 	so.delivery_date = delivery_date
+	so.transaction_date = transaction_date
 
 	so.insert()
 	so.submit()
 
 	return so
+
+
+def create_payment_terms_templates():
+	from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_term
+
+	create_payment_term("_Test Payment Term 0 days after invoice")
+
+	if not frappe.db.exists("Payment Terms Template", "_Test 0 days after invoice"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test 0 days after invoice",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test 0 days after invoice",
+						"invoice_portion": 100.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+				],
+			}
+		).insert()
+
+	create_payment_term("_Test Payment Term 14 days after invoice")
+
+	if not frappe.db.exists("Payment Terms Template", "_Test 14 days after invoice"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test 14 days after invoice",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test 14 days after invoice",
+						"invoice_portion": 100.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 14,
+					},
+				],
+			}
+		).insert()
+
+	if not frappe.db.exists("Payment Terms Template", "_Test Split 0 and 14 days after invoice"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test Split 0 and 14 days after invoice",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test 0 days after invoice",
+						"invoice_portion": 50.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test 14 days after invoice",
+						"invoice_portion": 50.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 14,
+					},
+				],
+			}
+		).insert()
