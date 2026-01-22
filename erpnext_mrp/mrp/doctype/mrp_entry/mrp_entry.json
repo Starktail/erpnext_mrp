@@ -19,7 +19,10 @@
   "lead_time",
   "is_urgent",
   "urgency_level",
+  "section_break_xyvo",
   "on_hand_inventory",
+  "column_break_lmds",
+  "on_hand_inventory_excl_reorder_level",
   "open_orders_section",
   "open_orders",
   "reserved_qty",
@@ -35,11 +38,16 @@
   "ordered_qty",
   "section_break_sgyw",
   "suggested_receipts",
-  "suggested_receipts_excl_reorder_level",
   "suggested_orders",
-  "suggested_orders_excl_reorder_level",
+  "column_break_lldg",
+  "suggested_receipts_excl_reorder_level",
+  "section_break_dfyi",
+  "suggested_orders_value",
+  "suggested_orders_value_payable",
   "section_break_gruc",
-  "projected_on_hand_inventory"
+  "projected_on_hand_inventory",
+  "column_break_zpfl",
+  "projected_on_hand_inventory_excl_reorder_level"
  ],
  "fields": [
   {
@@ -238,16 +246,53 @@
    "label": "Suggested Receipts (Excl Reorder Level)"
   },
   {
-   "description": "Used to determine Urgency Level",
-   "fieldname": "suggested_orders_excl_reorder_level",
+   "fieldname": "column_break_lldg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_dfyi",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Currency Value of Suggested Orders",
+   "fieldname": "suggested_orders_value",
+   "fieldtype": "Currency",
+   "label": "Suggested Orders Value"
+  },
+  {
+   "description": "Time-adjusted 'Suggested Orders Value Payable' (Takes payment terms into account)",
+   "fieldname": "suggested_orders_value_payable",
+   "fieldtype": "Currency",
+   "label": "Suggested Orders Value Payable"
+  },
+  {
+   "fieldname": "section_break_xyvo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_lmds",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Stock on Hand (Begin of period)",
+   "fieldname": "on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
-   "label": "Suggested Orders (Excl Reorder Level)"
+   "label": "On Hand Inventory (Excl Reorder Level)"
+  },
+  {
+   "fieldname": "column_break_zpfl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "projected_on_hand_inventory_excl_reorder_level",
+   "fieldtype": "Float",
+   "label": "Projected Stock on Hand (Excl Reorder Level)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-12-12 11:10:30.575981",
+ "modified": "2026-01-22 23:45:57.056220",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

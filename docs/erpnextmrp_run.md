@@ -54,6 +54,14 @@ Finally, the system calculates the net position and suggests actions.
     5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
     6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
     7.  **Urgency Flag**: If a suggested order is calculated for a period that is already in the past, the item is flagged as `Urgent`.
+- **Cash Requirements**: Finally, the system projects the financial impact of the plan.
+    - **Order Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
+    - **Payable Value**: Projects the cash outflow based on the default Supplier's **Payment Terms**. The system calculates the due date (assuming the invoice is dated upon receipt of goods) and distributes the payable amount to the corresponding weeks.
+    - **Custom Due Dates**: For more precise cash planning, the system supports dynamic due dates on the `Payment Term` doctype. This allows you to split payments based on milestones:
+        - **Order date**: The payment is calculated relative to when the `Suggested Order` is placed.
+        - **Shipment date**: The payment is calculated relative to the shipment date (Order date + Item's primary lead time).
+        - **Arrival date**: The payment is calculated relative to the arrival date (Order date + Item's total lead time).
+        - If no custom due date is set, the system defaults to the **Arrival date**.
 
 ## MRP Entry Fields
 
@@ -79,3 +87,5 @@ The following are the key fields calculated for each item in each period:
 | `suggested_receipts`            | The quantity the MRP calculation suggests should be received in this period to avoid a shortage.                                                                      |
 | `suggested_orders`              | The quantity that should be ordered, offset by lead time. This is the primary action field.                                                                           |
 | `projected_on_hand_inventory`   | The projected stock on hand at the end of the period after considering all demand, supply, and suggested receipts.                                                    |
+| `suggested_orders_value`        | The estimated value of the suggested orders.                                                                                                                          |
+| `suggested_orders_value_payable`| The projected cash outflow for the period, based on the supplier's payment terms.                                                                                     |

@@ -78,5 +78,21 @@
     "lead_time_days": 28,
     "safety_stock": 10,
     "min_order_qty": 5
+  },
+  {
+    "item_code": "SRZ11111",
+    "item_name": "Test Standalone Simple Item 1",
+    "item_group": "_Test Item Group A",
+    "lead_time_days": 0,
+    "safety_stock": 0,
+    "min_order_qty": 0
+  },
+  {
+    "item_code": "SRZLONG123",
+    "item_name": "Test Long Lead Time Item 1",
+    "item_group": "_Test Item Group A",
+    "lead_time_days": 112,
+    "safety_stock": 30,
+    "min_order_qty": 100
   }
 ]

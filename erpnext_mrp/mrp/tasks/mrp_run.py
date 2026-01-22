@@ -4,8 +4,11 @@ import math
 from datetime import date
 
 import frappe
+from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
+from frappe.utils import add_days, getdate
+from pypika import Order
 
 from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
 
@@ -736,12 +739,34 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	# First row contains headers, second row contains data
 	stock_levels = stock_level_report[1]
 
+	settings = frappe.get_cached_doc("MRP Settings")
+	requirement_based_on = settings.requirement_based_on
+
+	lead_time_field = "lead_time_days"
+	if settings.item_lead_time_field:
+		lead_time_field = settings.item_lead_time_field.split("|")[0].strip()
+
+	additional_lead_time_field = None
+	if settings.item_additional_lead_time_field:
+		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
+
+	if additional_lead_time_field:
+		lead_time_expression = f"COALESCE(t_item.`{lead_time_field}`, 0)"
+		additional_lead_time_expression = f"COALESCE(CAST(NULLIF(t_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
+	else:
+		lead_time_expression = f"t_item.`{lead_time_field}`"
+		additional_lead_time_expression = "0"
+
 	# Get item details in a single query
-	item_details_query = """
+	item_details_query = f"""
         SELECT DISTINCT
             mrp.item_code,
             t_item.safety_stock,
             t_item.min_order_qty,
+			t_item.valuation_rate as fall_back_valuation_rate,
+            COALESCE(t_item.`{lead_time_field}`, 0) as primary_lead_time,
+            {lead_time_expression} AS primary_lead_time,
+			{additional_lead_time_expression} AS additional_lead_time,
             id.default_supplier
         FROM `tabMRP Entry` AS mrp
         JOIN `tabItem` AS t_item
@@ -750,9 +775,6 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
             ON mrp.item_code = id.parent AND id.default_supplier IS NOT NULL
     """
 	item_details_list = frappe.db.sql(item_details_query, as_dict=True)
-
-	settings = frappe.get_cached_doc("MRP Settings")
-	requirement_based_on = settings.requirement_based_on
 
 	# Process items in batches
 	batch_size = 1000
@@ -791,18 +813,47 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 	item_details_map = {item["item_code"]: item for item in item_batch}
 
+	item_prices = _get_item_prices(item_codes)
+
+	# Get supplier payment terms
+	suppliers = list(set(item["default_supplier"] for item in item_batch if item.get("default_supplier")))
+	supplier_payment_terms = {}
+	if suppliers:
+		supplier_payment_terms = {s.name: s.payment_terms for s in frappe.get_all("Supplier", filters={"name": ("in", suppliers)}, fields=["name", "payment_terms"])}
+
+	# Get Payment Terms details for custom due dates
+	payment_term_details = {}
+	all_payment_terms = frappe.get_all("Payment Term", fields=["name", "custom_due_date"])
+	for pt in all_payment_terms:
+		payment_term_details[pt.name] = pt
+
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
 
+		# Check for a buying price list first
+		price = item_prices.get(item_code)
+		if not price:
+			# Get valuation rate from stock levels (Bin)
+			item_stock_levels = [sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0]
+			valuation_rate = 0
+			if item_stock_levels:
+				valuation_rate = sum(item_stock_levels) / len(item_stock_levels)
+			if valuation_rate:
+				price = valuation_rate
+			else:
+				price = item_details.get("fall_back_valuation_rate")
+
 		# Set current stock level as starting stock on hand
 		mrp_entry_docs[0].on_hand_inventory = sum([stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code])
+		mrp_entry_docs[0].on_hand_inventory_excl_reorder_level = mrp_entry_docs[0].on_hand_inventory
+		total_item_demand = 0
 
 		for index, entry in enumerate(mrp_entry_docs):
 			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
 				entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
-
+				entry.on_hand_inventory_excl_reorder_level = mrp_entry_docs[index - 1].projected_on_hand_inventory_excl_reorder_level
 			# Set the re-order details
 			if item_details:
 				entry.reorder_level = item_details.get("safety_stock")
@@ -828,45 +879,144 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				# Default to Open Orders + Forecast
 				raise ValueError(_("Unkown 'Requirement based on' setting"))
 
-			# Determine if there is a shortage
+			total_item_demand += demand
+
+			# Determine if there is a shortage taking safety stock into account
 			entry.suggested_receipts = 0
 			shortage = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0) - (entry.reorder_level or 0)
-			shortage_excl_reorder_level = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0)
 			if shortage < 0:
 				shortage *= -1
-				shortage_excl_reorder_level *= -1
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts = math.ceil(shortage / moq) * moq
-				entry.suggested_receipts_excl_reorder_level = math.ceil(shortage_excl_reorder_level / moq) * moq
 
 			entry.projected_on_hand_inventory = (entry.on_hand_inventory or 0) - demand + (entry.scheduled_receipts or 0) + (entry.suggested_receipts or 0)
 
+			# Determine if there is a shortage exlcuding safety stock
+			entry.suggested_receipts_excl_reorder_level = 0
+			shortage_excl_reorder_level = (entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
+			if shortage_excl_reorder_level < 0:
+				shortage_excl_reorder_level *= -1
+				moq = entry.reorder_quantity or 1
+				entry.suggested_receipts_excl_reorder_level = math.ceil(shortage_excl_reorder_level / moq) * moq
+
+			entry.projected_on_hand_inventory_excl_reorder_level = (
+				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0) + (entry.suggested_receipts_excl_reorder_level or 0)
+			)
+
 		# Based on lead time, set the suggested order qty for the correct earlier entry
-		urgency_level = 0
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
 			if entry.suggested_receipts:
 				weeks_before = math.ceil(entry.lead_time / 7)
-				# If we should have ordered already, flag this entry and set suggested_orders in current period
+				# If we should have ordered already, set suggested_orders in current period
 				if index - weeks_before < 0:
 					mrp_entry_docs[0].suggested_orders = (mrp_entry_docs[0].suggested_orders or 0) + entry.suggested_receipts
-					mrp_entry_docs[0].suggested_orders_excl_reorder_level = (mrp_entry_docs[0].suggested_orders_excl_reorder_level or 0) + entry.suggested_receipts_excl_reorder_level
 				# Else, set suggested_orders in leadtime-adjusted period
 				else:
 					mrp_entry_docs[index - weeks_before].suggested_orders = (mrp_entry_docs[index - weeks_before].suggested_orders or 0) + entry.suggested_receipts
-					mrp_entry_docs[index - weeks_before].suggested_orders_excl_reorder_level = (
-						mrp_entry_docs[index - weeks_before].suggested_orders_excl_reorder_level or 0
-					) + entry.suggested_receipts_excl_reorder_level
 
-			entry.urgency_level = urgency_level
 			entry.save()
 
-			# Determine Level of Urgency
-			# Level 1: Required and not enough On Order (excl safety stock)
-			if mrp_entry_docs[0].suggested_orders_excl_reorder_level:
-				mrp_entry_docs[0].urgency_level = 1
-			# Level 2. Enough On Order, but late (excl safety stock)
-			elif mrp_entry_docs[0].suggested_orders_excl_reorder_level == 0 and mrp_entry_docs[0].scheduled_receipts:
-				mrp_entry_docs[0].urgency_level = 2
-			elif mrp_entry_docs[0].suggested_orders:
-				mrp_entry_docs[0].urgency_level = 3
-			mrp_entry_docs[0].save()
+		# Determine Level of Urgency
+		# Level 1: Required and not enough On Order (excl safety stock)
+		# Current SoH + Total scheduled_receipts < total demand
+		total_scheduled_receipts = sum([entry.scheduled_receipts for entry in mrp_entry_docs])
+		if mrp_entry_docs[0].on_hand_inventory + total_scheduled_receipts < total_item_demand:
+			mrp_entry_docs[0].urgency_level = 1
+
+		# Level 2. Enough On Order, but late (excl safety stock)
+		# Current SoH + Total scheduled_receipts >= total demand
+		# AND
+		# Somewhere we will run out of stock (aka any suggested_receipts_excl_reorder_level > 0)
+		elif sum([entry.suggested_receipts_excl_reorder_level for entry in mrp_entry_docs]) > 0:
+			mrp_entry_docs[0].urgency_level = 2
+
+		# Level 3. On order, but the stock level will drop below the safety stock level
+		# Current SoH + Total scheduled_receipts >= total demand
+		# AND
+		# Somewhere we will land below the safety stock level (aka suggested_receipts > 0)
+		elif sum([entry.suggested_receipts for entry in mrp_entry_docs]) > 0:
+			mrp_entry_docs[0].urgency_level = 3
+
+		else:
+			mrp_entry_docs[0].urgency_level = 0
+
+		mrp_entry_docs[0].save()
+
+		# Now that all suggested_orders have been calculated, calculate their value
+		if price and price > 0:
+			for entry in mrp_entry_docs:
+				if entry.suggested_orders:
+					new_value = entry.suggested_orders * price
+					if entry.suggested_orders_value != new_value:
+						entry.suggested_orders_value = new_value
+						entry.save()
+
+		# Calculate Cash Requirement (Payable Value)
+		supplier_name = item_details.get("default_supplier")
+		payment_terms_template = supplier_payment_terms.get(supplier_name) if supplier_name else None
+
+		if supplier_name and payment_terms_template:
+			# Map to quickly find entry by name
+			entry_map = {e.name: e for e in mrp_entry_docs}
+			for entry in mrp_entry_docs:
+				if entry.suggested_orders_value:
+					schedule = get_payment_terms(
+						payment_terms_template,
+						posting_date=entry.target_date,
+						grand_total=entry.suggested_orders_value,
+						base_grand_total=entry.suggested_orders_value,
+					)
+					if schedule:
+						for term in schedule:
+							# Determine the base date for due date calculation
+							base_date = None
+							payment_term_name = term.get("payment_term")
+							if payment_term_name:
+								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get("custom_due_date")
+
+								if custom_due_date_type == "Order date":
+									base_date = entry.target_date
+								elif custom_due_date_type == "Shipment date":
+									base_date = add_days(entry.target_date, item_details.get("primary_lead_time") or 0)
+								elif custom_due_date_type == "Arrival date":
+									# Arrival Date Order Date (Order + Total Lead Time)
+									total_lead_time = (item_details.get("primary_lead_time") or 0) + (item_details.get("additional_lead_time") or 0)
+									base_date = add_days(entry.target_date, total_lead_time)
+								else:
+									base_date = entry.target_date
+
+							if base_date:
+								term.due_date = get_due_date(term, posting_date=base_date)
+
+							due_date = term.get("due_date")
+							payment_amount = term.get("payment_amount")
+							if due_date and payment_amount:
+								# Find target entry CW
+								year, week, _day = getdate(due_date).isocalendar()
+								target_name = f"{item_code}-{year}CW{week:02d}"
+								target_entry = entry_map.get(target_name)
+								if target_entry:
+									target_entry.suggested_orders_value_payable = (target_entry.suggested_orders_value_payable or 0) + payment_amount
+									target_entry.save()
+
+
+def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
+	today = date.today()
+	ItemPrice = frappe.qb.DocType("Item Price")
+
+	item_prices_docs = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.item_code, ItemPrice.price_list_rate, ItemPrice.creation)
+		.where((ItemPrice.item_code.isin(item_codes)) & (ItemPrice.buying == 1) & (ItemPrice.valid_from <= today) & ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull())))
+		.orderby(ItemPrice.creation, order=Order.desc)
+		# .run(as_dict=True)
+	)
+
+	item_prices_docs = item_prices_docs.run(as_dict=True)
+
+	item_prices = {}
+	for d in item_prices_docs:
+		if d.item_code not in item_prices:
+			item_prices[d.item_code] = d.price_list_rate
+
+	return item_prices

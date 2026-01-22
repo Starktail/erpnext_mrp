@@ -1,127 +1,132 @@
 [
- {
-   "item_code": "SR04820",
-   "forecast_date": "2025-12-01",
-   "forecast_quantity": 5
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2025-12-08",
-   "forecast_quantity": 10
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2025-12-15",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2025-12-22",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2025-12-29",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-01-05",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-01-12",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-01-19",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-01-26",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-02-02",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-02-09",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-02-16",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-02-23",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-03-02",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-03-09",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-03-16",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-03-23",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-03-30",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-04-06",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-04-13",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-04-20",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-04-27",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-05-04",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-05-11",
-   "forecast_quantity": 15
- },
- {
-   "item_code": "SR04820",
-   "forecast_date": "2026-05-18",
-   "forecast_quantity": 15
- }
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 0,
+    "forecast_date": "2026-01-21"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 0,
+    "forecast_date": "2026-01-28"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-02-04"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-02-11"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-02-18"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-02-25"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-03-04"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-03-11"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-03-18"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-03-25"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-04-01"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-04-08"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-04-15"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-04-22"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-04-29"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-05-06"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-05-13"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-05-20"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-05-27"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-06-03"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-06-10"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-06-17"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-06-24"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-07-01"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-07-08"
+  },
+  {
+    "item_code": "SRZLONG123",
+    "forecast_quantity": 16,
+    "forecast_date": "2026-07-15"
+  }
 ]
