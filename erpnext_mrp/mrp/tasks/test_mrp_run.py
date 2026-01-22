@@ -4,6 +4,7 @@ import os
 from unittest.mock import patch
 
 import frappe
+from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
@@ -45,11 +46,11 @@ class TestMRPRun(FrappeTestCase):
 			for bom in test_data_boms:
 				make_bom(**bom)
 
-		# # Load and create test MRP Forecast records
-		# with open(test_data_file_forecast) as f:
-		# 	test_data_forecasts = json.load(f)
-		# 	for fc in test_data_forecasts:
-		# 		create_mrp_forecast(fc)
+		# Load and create test MRP Forecast records
+		with open(test_data_file_forecast) as f:
+			test_data_forecasts = json.load(f)
+			for fc in test_data_forecasts:
+				create_mrp_forecast(fc)
 
 		# Set up MRP Settings
 		if not frappe.db.exists("MRP Settings", "MRP Settings"):
@@ -106,12 +107,12 @@ class TestMRPRun(FrappeTestCase):
 			order_by="target_date asc",
 		)
 
-		# Expect 11 items as per erpnext_mrp/tests/test_mrp_data_items.json
+		# Expect 12 items as per erpnext_mrp/tests/test_mrp_data_items.json
 		unique_items = set([entry.item_code for entry in all_mrp_entries])
-		self.assertEqual(len(unique_items), 11)
+		self.assertEqual(len(unique_items), 12)
 
-		# Expect 121 MRP Entry records (11 items x 11 weeks look-ahead)
-		self.assertEqual(len(all_mrp_entries), 121)
+		# Expect 121 MRP Entry records (12 items x 11 weeks look-ahead)
+		self.assertEqual(len(all_mrp_entries), 132)
 
 		# Expect first MRP Entry record should be for current calendar week, in format [item]-[year]CW[calendar week], e.g. AAA-2025CW02
 		calendar_date = test_start_day.isocalendar()
@@ -450,6 +451,130 @@ class TestMRPRun(FrappeTestCase):
 		# Test that correct Urgency Level is calculated on MRP Entries
 
 		# Add another demand for parent item (SR04820) with different due date, to test that qtys are aggregated
+
+	def test_item_with_long_lead_time(self, mock_date):
+		"""
+		Test that MRP Entry records are calculated correctly for item with long lead time.
+		Using SRZLONG123 (see test_mrp_data_items.json and test_mrp_data_forecast.json)
+		Run only for a single item to keep it simple.
+		"""
+		test_start_day = datetime.date(2026, 1, 22)
+		mock_date.today.return_value = test_start_day
+
+		# Set MRP Settings item_condition and look_ahead
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZLONG123'"
+		mrp_settings.look_ahead = 26
+		mrp_settings.periods_type = "Calendar Week"
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.save()
+
+		# Create starting stock level for item
+		make_stock_entry(
+			item_code="SRZLONG123",
+			posting_date=add_days(test_start_day, -1),
+			qty=130,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		# Run MRP
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Expect an unchanged Projected On Hand Inventory Qty for "SRZLONG123" in the first two weeks (forecast of 0)
+		mrp_entries = frappe.get_all(
+			"MRP Entry",
+			fields=["name", "on_hand_inventory", "suggested_receipts", "suggested_orders", "projected_on_hand_inventory", "urgency_level"],
+			filters={"item_code": "SRZLONG123"},
+			order_by="name asc",
+		)
+		self.assertEqual(mrp_entries[0].projected_on_hand_inventory, 130)
+		self.assertEqual(mrp_entries[1].projected_on_hand_inventory, 130)
+
+		# Expect a Projected On Hand Inventory Qty for "SRZLONG123" dropping by 16 per week (that's the forecast that consumes it) thereafter
+		self.assertEqual(mrp_entries[2].projected_on_hand_inventory, 114)
+		self.assertEqual(mrp_entries[3].projected_on_hand_inventory, 98)
+		self.assertEqual(mrp_entries[4].projected_on_hand_inventory, 82)
+		self.assertEqual(mrp_entries[5].projected_on_hand_inventory, 66)
+		self.assertEqual(mrp_entries[6].projected_on_hand_inventory, 50)
+		self.assertEqual(mrp_entries[7].projected_on_hand_inventory, 34)
+
+		# In the next week, we will reach below the re-order level (of 30), so we expect a Suggested Receipt here
+		self.assertEqual(mrp_entries[8].suggested_receipts, 100)
+		self.assertEqual(mrp_entries[8].projected_on_hand_inventory, 118)
+
+		# Expect a Projected On Hand Inventory Qty dropping by 16 per week thereafter
+		self.assertEqual(mrp_entries[9].projected_on_hand_inventory, 102)
+		self.assertEqual(mrp_entries[10].projected_on_hand_inventory, 86)
+		self.assertEqual(mrp_entries[11].projected_on_hand_inventory, 70)
+		self.assertEqual(mrp_entries[12].projected_on_hand_inventory, 54)
+		self.assertEqual(mrp_entries[13].projected_on_hand_inventory, 38)
+
+		# In the next week, we will reach below the re-order level (of 30), so we expect a Suggested Receipt here
+		self.assertEqual(mrp_entries[14].suggested_receipts, 100)
+		self.assertEqual(mrp_entries[14].projected_on_hand_inventory, 122)
+
+		# Expect a Projected On Hand Inventory Qty dropping by 16 per week thereafter
+		self.assertEqual(mrp_entries[15].projected_on_hand_inventory, 106)
+		self.assertEqual(mrp_entries[16].projected_on_hand_inventory, 90)
+		self.assertEqual(mrp_entries[17].projected_on_hand_inventory, 74)
+		self.assertEqual(mrp_entries[18].projected_on_hand_inventory, 58)
+		self.assertEqual(mrp_entries[19].projected_on_hand_inventory, 42)
+
+		# In the next week, we will reach below the re-order level (of 30), so we expect a Suggested Receipt here
+		self.assertEqual(mrp_entries[20].suggested_receipts, 100)
+		self.assertEqual(mrp_entries[20].projected_on_hand_inventory, 126)
+
+		# Expect a Projected On Hand Inventory Qty dropping by 16 per week thereafter
+		self.assertEqual(mrp_entries[21].projected_on_hand_inventory, 110)
+		self.assertEqual(mrp_entries[22].projected_on_hand_inventory, 94)
+		self.assertEqual(mrp_entries[23].projected_on_hand_inventory, 78)
+		self.assertEqual(mrp_entries[24].projected_on_hand_inventory, 62)
+		self.assertEqual(mrp_entries[25].projected_on_hand_inventory, 46)
+
+		# Now to check the Suggested Orders
+		# Working backwards, we have a Suggested Receipts in period 20.
+		# With a lead time of 112 days, we expect a Suggested Order in period 4
+		self.assertEqual(mrp_entries[4].suggested_orders, 100)
+
+		# We have a Suggested Receipts in periods 14 and 8.
+		# As the lead time of 112 days is longer than this, we expect an URGENT (p1) Suggested Order for this in period 0
+		self.assertEqual(mrp_entries[0].suggested_orders, 200)
+		self.assertEqual(mrp_entries[0].urgency_level, 1, "Expected an urgency_level of 1")
+
+		# Now, add an actual receipt in period 14
+		# In total we'll have enough to meet demand, but the receipts are late, hence a p2 scenario
+		create_purchase_order(item_code="SRZLONG123", qty=260, delivery_date="2026-04-29", transaction_date=test_start_day)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		mrp_entries = frappe.get_all("MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc")
+
+		self.assertEqual(mrp_entries[0].urgency_level, 2, "Expected an urgency_level of 2")
+
+		# Now, add an another receipt in period 3
+		# This will avoid a shortage, but still bring the stock level to below the safety stock level, hence a p3 scenario
+		create_purchase_order(item_code="SRZLONG123", qty=70, delivery_date="2026-02-11", transaction_date=test_start_day)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		mrp_entries = frappe.get_all("MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc")
+
+		self.assertEqual(mrp_entries[0].urgency_level, 3, "Expected an urgency_level of 3")
+
+		# Now, add an another receipt in period 2
+		# This ensure the projected stock level is always above the safety stock level, hence a p0 scenario
+		create_purchase_order(item_code="SRZLONG123", qty=30, delivery_date="2026-02-04", transaction_date=test_start_day)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		mrp_entries = frappe.get_all(
+			"MRP Entry",
+			fields=["name", "on_hand_inventory", "suggested_receipts", "suggested_orders", "projected_on_hand_inventory", "urgency_level"],
+			filters={"item_code": "SRZLONG123"},
+			order_by="name asc",
+		)
+
+		self.assertEqual(mrp_entries[0].urgency_level, 0, "Expected an urgency_level of 0")
 
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable(self, mock_date):
 		"""
@@ -890,9 +1015,6 @@ def create_sales_order(item_code: str, qty: int, delivery_date: datetime.datetim
 			"item_code": item_code,
 			"warehouse": "_Test Warehouse - _TC",
 			"qty": qty,
-			# "uom": None,
-			# "price_list_rate": args.price_list_rate or None,
-			# "discount_percentage": args.discount_percentage or None,
 			"rate": 10,
 		},
 	)
@@ -904,6 +1026,38 @@ def create_sales_order(item_code: str, qty: int, delivery_date: datetime.datetim
 	so.submit()
 
 	return so
+
+
+def create_purchase_order(item_code: str, qty: int, delivery_date: datetime.datetime, transaction_date: datetime.datetime):
+	def dont_validate_minimum_order_qty(**args):
+		pass
+
+	po = frappe.new_doc("Purchase Order")
+	po.set_warehouse = ""
+	po.company = "_Test Company"
+	po.supplier = "_Test Supplier"
+	po.currency = "ZAR"
+	po.po_no = ""
+	po.append(
+		"items",
+		{
+			"item_code": item_code,
+			"warehouse": "_Test Warehouse - _TC",
+			"schedule_date": delivery_date,
+			"qty": qty,
+			"rate": 10,
+		},
+	)
+
+	po.schedule_date = delivery_date
+	po.transaction_date = transaction_date
+
+	po.validate_minimum_order_qty = dont_validate_minimum_order_qty
+
+	po.insert()
+	po.submit()
+
+	return po
 
 
 def create_payment_terms_templates():
