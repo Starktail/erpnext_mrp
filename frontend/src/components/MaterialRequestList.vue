@@ -493,7 +493,7 @@ export default {
 				},
 				{
 					value: 'suggested_orders_value',
-					label: 'Suggested Orders Value',
+					label: 'Suggested Orders Payable',
 					cellStyle: { textAlign: 'right' },
 					valueFormatter: (params) => this.formatCurrency(params.value),
 				},

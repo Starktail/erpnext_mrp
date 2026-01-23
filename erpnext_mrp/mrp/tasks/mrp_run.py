@@ -914,8 +914,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				else:
 					mrp_entry_docs[index - weeks_before].suggested_orders = (mrp_entry_docs[index - weeks_before].suggested_orders or 0) + entry.suggested_receipts
 
-			entry.save()
-
 		# Determine Level of Urgency
 		# Level 1: Required in first week and not enough On Order (excl safety stock)
 		# Current SoH + Total scheduled_receipts < total demand and no suggested orders for period 0
@@ -940,8 +938,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 		else:
 			mrp_entry_docs[0].urgency_level = 0
 
-		mrp_entry_docs[0].save()
-
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:
 			for entry in mrp_entry_docs:
@@ -949,7 +945,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 					new_value = entry.suggested_orders * price
 					if entry.suggested_orders_value != new_value:
 						entry.suggested_orders_value = new_value
-						entry.save()
 
 		# Calculate Cash Requirement (Payable Value)
 		supplier_name = item_details.get("default_supplier")
@@ -997,7 +992,9 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 								target_entry = entry_map.get(target_name)
 								if target_entry:
 									target_entry.suggested_orders_value_payable = (target_entry.suggested_orders_value_payable or 0) + payment_amount
-									target_entry.save()
+
+		for entry in mrp_entry_docs:
+			entry.save()
 
 
 def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
