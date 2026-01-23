@@ -33,6 +33,8 @@ class TestMRPRun(FrappeTestCase):
 		frappe.db.delete("Purchase Order")
 		frappe.db.delete("Work Order")
 		frappe.db.delete("Item Price")
+		frappe.db.delete("Stock Entry")
+		frappe.db.delete("Stock Ledger Entry")
 
 		# Load and create test items
 		with open(test_data_file_items) as f:

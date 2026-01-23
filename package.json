@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "erpnext-mrp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Starktail (Pty) Ltd <support@starktail.com>",
   "description": "MRP Tools for ERPNext",
   "workspaces": [
