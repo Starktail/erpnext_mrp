@@ -51,69 +51,67 @@ def create_mrp_item_entries():
 
 	# 2. Run the recursive query to get all items and their BOM levels
 	sql_query = f"""
-        WITH RECURSIVE bom_hierarchy (item_code, level) AS (
-            -- Anchor Member: Items that are not components in any active, default BOM (Level 0)
-            SELECT
-                t_item.name,
-                0
-            FROM
-                `tabItem` AS t_item
-            WHERE
-                t_item.name NOT IN (
-                    SELECT DISTINCT
-                        t_bom_item.item_code
-                    FROM
-                        `tabBOM Item` AS t_bom_item
-                    JOIN
-                        `tabBOM` AS t_bom ON t_bom_item.parent = t_bom.name
-                    WHERE
-                        t_bom.is_active = 1
-                        AND t_bom.is_default = 1
-                )
+        WITH RECURSIVE bom_hierarchy (item_code, level, root_bom) AS (
+			-- Anchor: root items (not a component in any active, default BOM)
+			SELECT
+				t_item.name AS item_code,
+				0 AS level,
+				(
+					SELECT b.name
+					FROM `tabBOM` b
+					WHERE b.item = t_item.name
+					AND b.is_active = 1
+					AND b.is_default = 1
+					LIMIT 1
+				) AS root_bom
+			FROM `tabItem` AS t_item
+			WHERE t_item.name NOT IN (
+				SELECT DISTINCT bi.item_code
+				FROM `tabBOM Item` bi
+				JOIN `tabBOM` b ON bi.parent = b.name
+				WHERE b.is_active = 1
+				AND b.is_default = 1
+			)
 
-            UNION ALL
+			UNION ALL
 
-            -- Recursive Member: Find components of items with a known level from default BOMs
-            SELECT
-                t_bom_item.item_code,
-                bh.level + 1
-            FROM
-                `tabBOM Item` AS t_bom_item
-            JOIN
-                `tabBOM` AS t_bom ON t_bom_item.parent = t_bom.name
-            JOIN
-                bom_hierarchy AS bh ON t_bom.item = bh.item_code
-            WHERE
-                t_bom.is_active = 1
-                AND t_bom.is_default = 1
-        ),
-        bom_levels AS (
-            -- Calculate the maximum (deepest) level for each item
-            SELECT
-                item_code,
-                MAX(level) AS bom_level
-            FROM
-                bom_hierarchy
-            GROUP BY
-                item_code
-        )
-        -- Final Selection
-        SELECT
-            t_item.name AS item_code,
-            {lead_time_expression} AS lead_time,
-            COALESCE(bl.bom_level, 0) AS bom_level,
-            (EXISTS (
-                SELECT 1
-                FROM `tabBOM` AS t_bom
-                WHERE t_bom.item = t_item.name AND t_bom.is_active = 1 AND t_bom.is_default = 1
-            )) AS is_manufactured
-        FROM
-            `tabItem` AS t_item
-        LEFT JOIN
-            bom_levels AS bl ON t_item.name = bl.item_code
-        WHERE
-            t_item.disabled = 0
-            AND t_item.is_stock_item = 1;
+			-- Recursive: explode components; keep the same root_bom flowing downward
+			SELECT
+				bi.item_code AS item_code,
+				bh.level + 1 AS level,
+				bh.root_bom AS root_bom
+			FROM `tabBOM Item` bi
+			JOIN `tabBOM` b ON bi.parent = b.name
+			JOIN bom_hierarchy bh ON b.item = bh.item_code
+			WHERE b.is_active = 1
+			AND b.is_default = 1
+		),
+		bom_rollup AS (
+			SELECT
+				item_code,
+				MAX(level) AS bom_level,
+				GROUP_CONCAT(DISTINCT root_bom ORDER BY root_bom SEPARATOR ', ') AS root_bom_names
+			FROM bom_hierarchy
+			GROUP BY item_code
+		)
+
+		SELECT
+			t_item.name AS item_code,
+			{lead_time_expression} AS lead_time,
+			COALESCE(br.bom_level, 0) AS bom_level,
+			br.root_bom_names AS root_bom_name,
+			(EXISTS (
+				SELECT 1
+				FROM `tabBOM` b
+				WHERE b.item = t_item.name
+				AND b.is_active = 1
+				AND b.is_default = 1
+			)) AS is_manufactured
+		FROM `tabItem` AS t_item
+		LEFT JOIN bom_rollup br ON t_item.name = br.item_code
+		WHERE t_item.disabled = 0
+		AND t_item.is_stock_item = 1;
+
     """
 	item_list = frappe.db.sql(sql_query)
 
@@ -148,12 +146,16 @@ def create_mrp_item_entries():
 	period_data = list(periods.items())
 
 	# 4. Efficiently combine items and periods and prepare for bulk insert
-	# item is a tuple: (item_code, bom_level, is_manufactured)
+	# item is a tuple: (item_code, bom_level, root_bom, is_manufactured)
 	# period is a tuple: (period_str, target_date)
 	owner = frappe.session.user
 	creation = datetime.datetime.now()
-	final_values = [(f"{item[0]}{period[0]}", item[0], item[1], item[2], item[3], period[1], owner, creation) for item, period in itertools.product(item_list, period_data)]
-	# 5. Perform a bulk insert of all generated records
+	final_values = [(f"{item[0]}{period[0]}", item[0], item[1], item[2], item[3], item[4], period[1], owner, creation) for item, period in itertools.product(item_list, period_data)]
+
+	# 5. Don't store bom_levels on every period, only the first period
+	final_values = [(*row[:4], row[4] if period_data[0][0] in row[0] else None, *row[5:]) for row in final_values]
+
+	# 6. Perform a bulk insert of all generated records
 	frappe.db.bulk_insert(
 		"MRP Entry",
 		fields=[
@@ -161,6 +163,7 @@ def create_mrp_item_entries():
 			"item_code",
 			"lead_time",
 			"bom_level",
+			"bom_list",
 			"is_manufactured",
 			"target_date",
 			"owner",

@@ -8,6 +8,7 @@
  "field_order": [
   "item_code",
   "bom_level",
+  "bom_list",
   "target_date",
   "is_manufactured",
   "item_name",
@@ -287,12 +288,17 @@
    "fieldname": "projected_on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
    "label": "Projected Stock on Hand (Excl Reorder Level)"
+  },
+  {
+   "fieldname": "bom_list",
+   "fieldtype": "Small Text",
+   "label": "BOM List"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-22 23:45:57.056220",
+ "modified": "2026-02-01 16:19:04.928290",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

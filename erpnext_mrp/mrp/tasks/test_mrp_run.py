@@ -105,7 +105,7 @@ class TestMRPRun(FrappeTestCase):
 		# Assert that MRP Entries are created for all items.
 		all_mrp_entries = frappe.get_all(
 			"MRP Entry",
-			fields=["name", "item_code", "target_date", "is_manufactured"],
+			fields=["name", "item_code", "target_date", "bom_list", "is_manufactured"],
 			order_by="target_date asc",
 		)
 
@@ -123,6 +123,8 @@ class TestMRPRun(FrappeTestCase):
 			all_mrp_entries[0].name,
 			f"{all_mrp_entries[0].item_code}-{calendar_date.year}CW{expected_cw_string}",
 		)
+		# Expect first MRP Entry to have a BOM List
+		self.assertEqual(all_mrp_entries[0].bom_list, "BOM-SR04820-001")
 
 		# Expect last MRP Entry records should be for current calendar week + 70 days
 		last_date = add_to_date(test_start_day, days=70)
@@ -132,6 +134,8 @@ class TestMRPRun(FrappeTestCase):
 			all_mrp_entries[-1].name,
 			f"{all_mrp_entries[-1].item_code}-{calendar_date.year}CW{expected_cw_string}",
 		)
+		# Expect last MRP Entry to have no BOM List (we only store the BOM list in first period MRP Entry)
+		self.assertIsNone(all_mrp_entries[-1].bom_list)
 
 		# Expect is_manufactured to be 1 for items with BOM's (assemblies and sub-assemblies), and 0 for items without
 		# As per erpnext_mrp/tests/test_mrp_data_boms.json, SRZ00967, SRZ00963 and SR04820 have BOM's
