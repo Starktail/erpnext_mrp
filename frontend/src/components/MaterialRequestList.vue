@@ -37,6 +37,9 @@
 				resizable: true,
 			}"
 			:getRowStyle="getRowStyle"
+			:tooltipShowDelay="300"
+			:tooltipHideDelay="2000"
+			:enableBrowserTooltips="false"
 			@grid-ready="onGridReady"
 			rowSelection="multiple"
 			@selection-changed="onSelectionChanged"
@@ -203,7 +206,9 @@ export default {
 					'item_code',
 					'item_name',
 					'item_group',
+					'bom_list',
 					'uom',
+					'bom_level',
 					'reorder_level',
 					'reorder_quantity',
 					'lead_time',
@@ -284,7 +289,9 @@ export default {
 						item_code: entry.item_code,
 						item_name: entry.item_name,
 						item_group: entry.item_group,
+						bom_list: entry.bom_list,
 						uom: entry.uom,
+						bom_level: entry.bom_level,
 						reorder_level: entry.reorder_level,
 						reorder_quantity: entry.reorder_quantity,
 						lead_time: entry.lead_time,
@@ -370,6 +377,17 @@ export default {
 					width: 120,
 				},
 				{ field: 'uom', headerName: 'Uom', sortable: true, filter: true, width: 100 },
+				{
+					field: 'bom_list',
+					headerName: 'BOM',
+					sortable: false,
+					filter: true,
+					width: 160,
+					wrapText: true,
+					tooltipField: 'bom_list',
+					cellClass: 'bom-clip',
+				},
+				{ field: 'bom_level', headerName: 'Lvl', sortable: true, filter: true, width: 70 },
 				{
 					field: 'reorder_level',
 					headerName: 'Reorder Level',
@@ -643,3 +661,10 @@ export default {
 	},
 }
 </script>
+
+<style>
+.bom-clip {
+	font-size: 11px;
+	line-height: 1.2;
+}
+</style>
