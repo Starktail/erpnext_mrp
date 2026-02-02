@@ -14,6 +14,7 @@
   "item_lead_time_field",
   "item_additional_lead_time_field",
   "po_item_delivery_date_field",
+  "reorder_qty_item_field",
   "column_break_bdmb",
   "html_rsvb"
  ],
@@ -71,31 +72,35 @@
    "options": "<p><strong>Condition Examples:</strong></p>\n<pre>doc.default_material_request_type == \"Purchase\"<br>doc.end_of_life &gt;= nowdate()<br>doc.lead_time_days &gt; 7\n</pre>\n"
   },
   {
-   "description": "The Item field to use as \"Lead Time\". Int fields only.",
+   "description": "The Item field to use as \"Lead Time\". Int fields only. Defaults to \"Lead Time in days\" field",
    "fieldname": "item_lead_time_field",
    "fieldtype": "Select",
-   "label": "Item Lead Time Field",
-   "reqd": 1
+   "label": "Custom Item Lead Time Field"
   },
   {
-   "description": "A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field.",
+   "description": "A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field. Defaults to the \"Required By\" field.",
    "fieldname": "po_item_delivery_date_field",
    "fieldtype": "Select",
-   "label": "Purchase Order Item Delivery Date Field",
-   "reqd": 1
+   "label": "Custom Purchase Order Item Delivery Date Field"
   },
   {
    "description": "An Item field to include in the Lead Time calculation",
    "fieldname": "item_additional_lead_time_field",
    "fieldtype": "Select",
    "label": "Item Additional Lead Time Field"
+  },
+  {
+   "description": "A field on 'tem' to use as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field",
+   "fieldname": "reorder_qty_item_field",
+   "fieldtype": "Select",
+   "label": "Custom Re-order Qty Item Field"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-19 08:25:44.119824",
+ "modified": "2026-02-02 21:25:22.027628",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",
