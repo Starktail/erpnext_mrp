@@ -390,7 +390,7 @@ export default {
 				{ field: 'bom_level', headerName: 'Lvl', sortable: true, filter: true, width: 70 },
 				{
 					field: 'reorder_level',
-					headerName: 'Reorder Level',
+					headerName: 'Safety Stock/Reorder Level',
 					sortable: true,
 					filter: true,
 					width: 110,
@@ -399,7 +399,7 @@ export default {
 				},
 				{
 					field: 'reorder_quantity',
-					headerName: 'Safety Stock',
+					headerName: 'Re-order Quantity',
 					sortable: true,
 					filter: true,
 					width: 110,
