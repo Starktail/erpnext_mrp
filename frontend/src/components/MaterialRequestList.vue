@@ -390,7 +390,7 @@ export default {
 				{ field: 'bom_level', headerName: 'Lvl', sortable: true, filter: true, width: 70 },
 				{
 					field: 'reorder_level',
-					headerName: 'Safety Stock/Reorder Level',
+					headerName: 'Safety Stock/Re-order Level',
 					sortable: true,
 					filter: true,
 					width: 110,
@@ -429,7 +429,14 @@ export default {
 					filter: true,
 					width: 120,
 					cellStyle: { textAlign: 'center' },
-					sort: 'desc',
+					comparator: (valueA, valueB) => {
+						// Custom sorting
+						//	- Ascending follows the order: 1 -> 2 -> 3 -> 0
+						//	- Descending follows the order: 0 -> 3 -> 2 -> 1
+						const valA = valueA === 0 ? 999 : valueA
+						const valB = valueB === 0 ? 999 : valueB
+						return valA - valB
+					},
 					cellRenderer: (params) => {
 						return params.value !== 0 ? `⚠️ <b>P${params.value}</b>` : params.value
 					},
