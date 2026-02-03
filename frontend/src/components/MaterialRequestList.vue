@@ -674,4 +674,36 @@ export default {
 	font-size: 11px;
 	line-height: 1.2;
 }
+
+.ag-theme-alpine .ag-cell-label-container {
+	flex-direction: row;
+	flex-wrap: wrap;
+}
+
+.ag-theme-alpine .ag-header-cell-label {
+	display: contents;
+}
+
+.ag-theme-alpine .ag-header-cell-filter-button {
+	order: 1;
+	margin-right: 4px;
+}
+
+.ag-theme-alpine .ag-sort-indicator-container {
+	order: 2;
+}
+
+.ag-theme-alpine .ag-header-cell-text {
+	order: 3;
+	width: 100%;
+	margin-top: 2px;
+}
+
+.ag-theme-alpine .ag-right-aligned-header .ag-cell-label-container {
+	justify-content: flex-end;
+}
+
+.ag-theme-alpine .ag-right-aligned-header .ag-header-cell-text {
+	text-align: right;
+}
 </style>
