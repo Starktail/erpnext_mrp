@@ -222,6 +222,7 @@ export default {
 					'suggested_receipts',
 					'suggested_orders',
 					'suggested_orders_value',
+					'suggested_orders_value_payable',
 					'projected_on_hand_inventory',
 				],
 				orderBy: 'creation desc',
@@ -315,6 +316,7 @@ export default {
 					'suggested_receipts',
 					'suggested_orders',
 					'suggested_orders_value',
+					'suggested_orders_value_payable',
 					'projected_on_hand_inventory',
 				]
 
@@ -390,7 +392,7 @@ export default {
 				{ field: 'bom_level', headerName: 'Lvl', sortable: true, filter: true, width: 70 },
 				{
 					field: 'reorder_level',
-					headerName: 'Safety Stock/Reorder Level',
+					headerName: 'Safety Stock/Re-order Level',
 					sortable: true,
 					filter: true,
 					width: 110,
@@ -429,7 +431,14 @@ export default {
 					filter: true,
 					width: 120,
 					cellStyle: { textAlign: 'center' },
-					sort: 'desc',
+					comparator: (valueA, valueB) => {
+						// Custom sorting
+						//	- Ascending follows the order: 1 -> 2 -> 3 -> 0
+						//	- Descending follows the order: 0 -> 3 -> 2 -> 1
+						const valA = valueA === 0 ? 999 : valueA
+						const valB = valueB === 0 ? 999 : valueB
+						return valA - valB
+					},
 					cellRenderer: (params) => {
 						return params.value !== 0 ? `⚠️ <b>P${params.value}</b>` : params.value
 					},
@@ -511,9 +520,15 @@ export default {
 				},
 				{
 					value: 'suggested_orders_value',
+					label: 'Suggested Orders Value',
+					cellStyle: { textAlign: 'right' },
+					valueFormatter: (params) => (params.value > 0 ? this.formatCurrency(params.value) : ''),
+				},
+				{
+					value: 'suggested_orders_value_payable',
 					label: 'Suggested Orders Payable',
 					cellStyle: { textAlign: 'right' },
-					valueFormatter: (params) => this.formatCurrency(params.value),
+					valueFormatter: (params) => (params.value > 0 ? this.formatCurrency(params.value) : ''),
 				},
 				{ value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
 			]
@@ -666,5 +681,41 @@ export default {
 .bom-clip {
 	font-size: 11px;
 	line-height: 1.2;
+}
+
+.ag-theme-alpine .ag-cell-label-container {
+	flex-direction: row;
+	flex-wrap: wrap;
+}
+
+.ag-theme-alpine .ag-header-cell-label {
+	display: contents;
+}
+
+.ag-theme-alpine .ag-header-cell-filter-button {
+	order: 1;
+	margin-right: 4px;
+}
+
+.ag-theme-alpine .ag-sort-indicator-container {
+	order: 2;
+}
+
+.ag-theme-alpine .ag-header-cell-text {
+	order: 3;
+	width: 100%;
+	margin-top: 2px;
+}
+
+.ag-theme-alpine .ag-right-aligned-header .ag-cell-label-container {
+	justify-content: flex-end;
+}
+
+.ag-theme-alpine .ag-right-aligned-header .ag-header-cell-text {
+	text-align: right;
+}
+
+.ag-theme-alpine {
+	z-index: 0;
 }
 </style>
