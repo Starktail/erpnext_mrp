@@ -222,6 +222,7 @@ export default {
 					'suggested_receipts',
 					'suggested_orders',
 					'suggested_orders_value',
+					'suggested_orders_value_payable',
 					'projected_on_hand_inventory',
 				],
 				orderBy: 'creation desc',
@@ -315,6 +316,7 @@ export default {
 					'suggested_receipts',
 					'suggested_orders',
 					'suggested_orders_value',
+					'suggested_orders_value_payable',
 					'projected_on_hand_inventory',
 				]
 
@@ -518,9 +520,15 @@ export default {
 				},
 				{
 					value: 'suggested_orders_value',
+					label: 'Suggested Orders Value',
+					cellStyle: { textAlign: 'right' },
+					valueFormatter: (params) => (params.value > 0 ? this.formatCurrency(params.value) : ''),
+				},
+				{
+					value: 'suggested_orders_value_payable',
 					label: 'Suggested Orders Payable',
 					cellStyle: { textAlign: 'right' },
-					valueFormatter: (params) => this.formatCurrency(params.value),
+					valueFormatter: (params) => (params.value > 0 ? this.formatCurrency(params.value) : ''),
 				},
 				{ value: 'projected_on_hand_inventory', label: 'Projected On Hand Inventory' },
 			]
