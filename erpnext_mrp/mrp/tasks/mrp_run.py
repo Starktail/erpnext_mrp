@@ -760,12 +760,16 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 		lead_time_expression = f"t_item.`{lead_time_field}`"
 		additional_lead_time_expression = "0"
 
+	reorder_qty_field = "min_order_qty"
+	if settings.reorder_qty_item_field:
+		reorder_qty_field = settings.reorder_qty_item_field.split("|")[0].strip()
+
 	# Get item details in a single query
 	item_details_query = f"""
         SELECT DISTINCT
             mrp.item_code,
             t_item.safety_stock,
-            t_item.min_order_qty,
+            t_item.{reorder_qty_field} as reorder_quantity,
 			t_item.valuation_rate as fall_back_valuation_rate,
             COALESCE(t_item.`{lead_time_field}`, 0) as primary_lead_time,
             {lead_time_expression} AS primary_lead_time,
@@ -860,7 +864,7 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			# Set the re-order details
 			if item_details:
 				entry.reorder_level = item_details.get("safety_stock")
-				entry.reorder_quantity = item_details.get("min_order_qty")
+				entry.reorder_quantity = item_details.get("reorder_quantity")
 
 			# Set the default Supplier
 			if item_details:

@@ -86,5 +86,33 @@ frappe.ui.form.on("MRP Settings", {
 				frm.refresh_field("po_item_delivery_date_field");
 			},
 		});
+
+		// Set the Options for the reorder_level_item_field field
+		frappe.call({
+			method: "get_docfields",
+			doc: frm.doc,
+			args: {
+				doctype: "Item",
+				field_type: "Float",
+			},
+			callback: function (r) {
+				// Sort the array of objects alphabetically by the label property
+				r.message.sort((a, b) => {
+					const labelA = a.label || "";
+					const labelB = b.label || "";
+					return labelA.localeCompare(labelB);
+				});
+
+				// Use map to create an array of strings in the desired format
+				const formattedStrings = r.message.map((fields) => `${fields.fieldname} | ${fields.label}`);
+
+				// Join the strings with newline characters to create the final string
+				const options = "\n" + formattedStrings.join("\n");
+
+				// Set the Options property
+				frm.set_df_property("reorder_level_item_field", "options", options);
+				frm.refresh_field("reorder_level_item_field");
+			},
+		});
 	},
 });
