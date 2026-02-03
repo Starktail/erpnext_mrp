@@ -1,7 +1,10 @@
 <script setup>
+import { ref } from 'vue'
 import { Sidebar } from 'frappe-ui'
 import LayoutList from '~icons/lucide/layout-list'
 import BarChart2 from '~icons/lucide/bar-chart-2'
+
+const isCollapsed = ref(true)
 
 const header = {
 	title: 'ERPNext MRP',
@@ -51,5 +54,5 @@ function toggleTheme() {
 </script>
 
 <template>
-	<Sidebar :header="header" :sections="sections" />
+	<Sidebar :header="header" :sections="sections" v-model:collapsed="isCollapsed" />
 </template>
