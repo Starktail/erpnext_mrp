@@ -706,4 +706,8 @@ export default {
 .ag-theme-alpine .ag-right-aligned-header .ag-header-cell-text {
 	text-align: right;
 }
+
+.ag-theme-alpine {
+	z-index: 0;
+}
 </style>
