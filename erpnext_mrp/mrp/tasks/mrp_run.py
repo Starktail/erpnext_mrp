@@ -999,6 +999,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 								target_entry = entry_map.get(target_name)
 								if target_entry:
 									target_entry.suggested_orders_value_payable = (target_entry.suggested_orders_value_payable or 0) + payment_amount
+								elif getdate(due_date) < mrp_entry_docs[0].target_date:
+									mrp_entry_docs[0].suggested_orders_value_payable = (mrp_entry_docs[0].suggested_orders_value_payable or 0) + payment_amount
 
 		for entry in mrp_entry_docs:
 			entry.save()
