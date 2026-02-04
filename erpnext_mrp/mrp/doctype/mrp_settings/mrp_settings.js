@@ -87,7 +87,7 @@ frappe.ui.form.on("MRP Settings", {
 			},
 		});
 
-		// Set the Options for the reorder_level_item_field field
+		// Set the Options for the reorder_qty_item_field field
 		frappe.call({
 			method: "get_docfields",
 			doc: frm.doc,
@@ -110,8 +110,8 @@ frappe.ui.form.on("MRP Settings", {
 				const options = "\n" + formattedStrings.join("\n");
 
 				// Set the Options property
-				frm.set_df_property("reorder_level_item_field", "options", options);
-				frm.refresh_field("reorder_level_item_field");
+				frm.set_df_property("reorder_qty_item_field", "options", options);
+				frm.refresh_field("reorder_qty_item_field");
 			},
 		});
 	},
