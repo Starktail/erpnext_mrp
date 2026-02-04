@@ -27,3 +27,13 @@ The Item field to use as "Lead Time". Int fields only.,Das Feld „Artikel“ so
 An Item field to include in the Lead Time calculation,Ein Artikelfeld, das in die Lieferzeitberechnung einbezogen werden soll
 Purchase Order Item Delivery Date Field,Feld für Lieferdatum der Bestellposition
 A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field.,Ein Feld im Feld „Bestellposition“ das als Lieferdatum bei der Berechnung der Bestellmenge verwendet werden soll. Muss ein Pflichtfeld sein.
+"Optional: If set, only items with this condition will be taken into account when running MRP calculations","Optional: Wenn diese Option aktiviert ist, werden bei der Durchführung der MRP-Berechnungen nur Artikel mit dieser Bedingung berücksichtigt."
+Custom Item Lead Time Field,Feld für die Lieferzeit benutzerdefinierter Artikel
+The Item field to use as "Lead Time". Int fields only. Defaults to "Lead Time in days" field,"Das Feld „Artikel“, das als „Lieferzeit“ verwendet werden soll. Nur Integer-Felder. Standardmäßig wird das Feld „Lieferzeit in Tagen“ verwendet."
+An Item field to include in the Lead Time calculation,"Ein Artikelfeld, das in die Lieferzeitberechnung einbezogen werden soll."
+Custom Purchase Order Item Delivery Date Field,Feld für Lieferdatum der Artikel in der kundenspezifischen Bestellung
+A field on 'Purchase Order Item' to use as Delivery Date in Ordered Quantity calculation. Must be a Mandatory field. Defaults to the "Required By" field.,"Ein Feld im Feld „Bestellposition“, das als Lieferdatum für die Berechnung der Bestellmenge verwendet wird. Muss ein Pflichtfeld sein. Standardmäßig wird das Feld „Erforderlich bis“ verwendet."
+Custom Re-order Qty Item Field,Benutzerdefiniertes Nachbestellmengenfeld
+A field on 'Item' to use as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field,"Ein Feld im Artikel-Element, das als Nachbestellmenge verwendet werden soll. Standardmäßig wird das Feld „Mindestbestellmenge“ verwendet."
+Item Condition,Artikelzustand
+Reorder Quantity,Bestellmenge
