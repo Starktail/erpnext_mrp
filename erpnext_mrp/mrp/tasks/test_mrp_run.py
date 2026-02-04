@@ -927,6 +927,55 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entry_arrival_payable = get_mrp_entry_by_item_week("SRZ11111", item_arrival_payable_date)
 		self.assertEqual(mrp_entry_arrival_payable.suggested_orders_value_payable, 20 * 0.6)
 
+	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_with_no_supplier(self, mock_date):
+		"""
+		Test that MRP Entry record has correct Suggested Orders Value Payable with no default supplier.
+		Run only for a single item to keep it simple.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# Set MRP Settings item_condition
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		# item = frappe.get_doc("Item", "SRZ11111")
+		# item.lead_time_days = 0
+		# item.additional_shipping_days = 0
+		# item.item_defaults = []
+		# item.uoms = []
+
+		# Set up an Item Price
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list_rate = 2
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		# Create Sales Order due ~21 days from now
+		final_item_so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(item_code="SRZ11111", qty=10, delivery_date=final_item_so_date, transaction_date=test_start_day)
+
+		# Run MRP
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Expect a Reserved Qty value for the "SRZ11111" in the correct period
+		mrp_entry = get_mrp_entry_by_item_week("SRZ11111", final_item_so_date)
+		self.assertEqual(mrp_entry.reserved_qty, 10)
+
+		# Expect a Suggested Orders of the same amount as the order (this item has no lead times/min order qty)
+		self.assertEqual(mrp_entry.suggested_orders, 10)
+
+		# Expect a Suggested Orders Value
+		self.assertEqual(mrp_entry.suggested_orders_value, 20)
+
+		# Expect a Suggested Orders Value Payable
+		# With no default supplier, payable date should default to the order date
+		self.assertEqual(mrp_entry.suggested_orders_value_payable, 20)
+
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
 	isodate = demand_date.isocalendar()
