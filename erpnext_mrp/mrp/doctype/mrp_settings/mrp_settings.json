@@ -90,7 +90,7 @@
    "label": "Item Additional Lead Time Field"
   },
   {
-   "description": "A field on 'tem' to use as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field",
+   "description": "A field on 'Item' to use as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field",
    "fieldname": "reorder_qty_item_field",
    "fieldtype": "Select",
    "label": "Custom Re-order Qty Item Field"
@@ -100,7 +100,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-02 21:25:22.027628",
+ "modified": "2026-02-04 14:09:29.063632",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",
