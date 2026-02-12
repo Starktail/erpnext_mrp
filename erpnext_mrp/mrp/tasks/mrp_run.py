@@ -287,7 +287,7 @@ def _update_upstream_forecast_demand():
                     WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
                     ELSE de.target_date
                 END,
-                de.required_qty * bom_item.stock_qty * bom.quantity,
+                de.required_qty * bom_item.stock_qty / bom.quantity,
                 de.level + 1,
                 {lead_time_expression},
                 (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
@@ -547,7 +547,7 @@ def _update_upstream_so_demand():
                     WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
                     ELSE de.target_date
                 END,
-                de.required_qty * bom_item.stock_qty * bom.quantity,
+                de.required_qty * bom_item.stock_qty / bom.quantity,
                 de.level + 1,
                 {lead_time_expression},
                 (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
