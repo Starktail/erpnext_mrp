@@ -10,6 +10,8 @@ repos:
       - id: trailing-whitespace
         files: "erpnext_mrp.*"
         exclude: ".*json$|.*txt$|.*csv|.*md|.*svg"
+      - id: no-commit-to-branch
+        args: ['--branch', 'version-15']
       - id: check-merge-conflict
       - id: check-ast
       - id: check-json

@@ -1,7 +1,7 @@
 [project]
 name = "erpnext_mrp"
 authors = [
-    { name = "Finfoot Tech (Pty) Ltd", email = "dirk@finfoot.tech"}
+    { name = "Starktail (Pty) Ltd", email = "support@starktail.com"}
 ]
 description = "MRP Tools for ERPNext"
 requires-python = ">=3.10"
@@ -15,12 +15,16 @@ dependencies = [
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"
 
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<16.0.0"
+
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
 
+
 [tool.ruff]
-line-length = 200
+line-length = 110
 target-version = "py310"
 
 [tool.ruff.lint]

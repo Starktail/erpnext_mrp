@@ -1,12 +1,13 @@
 # Ignore vitepress dist files
-www/erpnextmrp*.py
+www/erpnext_mrp_*.py
 www/404.py
-www/erpnextmrp*.html
+www/erpnext_mrp_*.html
 www/404.html
 www/hashmap.json
 www/vp-icons.css
 www/assets
 public/app.*.js
-public/erpnextmrp*.js
+public/erpnext_mrp_*.js
 public/style.*.css
 public/chunks
+www/erpnext_mrp.html

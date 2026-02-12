@@ -2,31 +2,31 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "MRP Tools for ERPNext",
-  description: "MRP Tools for ERPNext",
+  title: "MRP Tools for ERPNext Documentation",
+  description: "MRP Tools for ERPNext Documentation",
   outDir: '../erpnext_mrp/www',
   assetsDir: 'assets/erpnext_mrp',
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Desk', link: '/' },
-      { text: 'Documentation Home', link: '/erpnextmrp_introduction' },
+      { text: 'Documentation Home', link: '/erpnext_mrp_introduction' },
       { text: 'Starktail', link: 'https://starktail.com' }
     ],
 
     sidebar: [
-      { text: 'Introduction', link: '/erpnextmrp_introduction' },
-      { text: 'MRP Calculations', link: '/erpnextmrp_run' },
-      { text: 'MRP Workbench', link: '/erpnextmrp_workbench' },
+      { text: 'Introduction', link: '/erpnext_mrp_introduction' },
+      { text: 'MRP Calculations', link: '/erpnext_mrp_run' },
+      { text: 'MRP Workbench', link: '/erpnext_mrp_workbench' },
     ],
 
     socialLinks: [
       { icon: 'mailgun', link: 'mailto:support@starktail.com'},
-      { icon: 'github', link: 'https://github.com/dvdl16/erpnext_mrp' }
+      { icon: 'github', link: 'https://github.com/Starktail/erpnext_mrp' }
     ],
 
     editLink: {
-      pattern: 'https://github.com/dvdl16/erpnext_mrp/edit/version-15/docs/:path'
+      pattern: 'https://github.com/Starktail/erpnext_mrp/edit/version-15/docs/:path'
     }
   },
   // Set metaChunk to avoid having window.__VP_HASH_MAP__ in the generated HTML, 

@@ -8,7 +8,7 @@ from frappe import _
 if frappe.session.user=='Guest':
     frappe.throw(_(\"You need to be logged in to access this page\"), frappe.PermissionError)"
 
-for file in erpnext_mrp/www/erpnextmrp*.html; do
+for file in erpnext_mrp/www/erpnext_mrp_*.html; do
   if [ -f "$file" ]; then
     py_file="erpnext_mrp/www/$(basename "$file" .html).py"
     echo "$AUTH_CONTENT" > "$py_file"
