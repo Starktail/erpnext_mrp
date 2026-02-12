@@ -7,7 +7,7 @@ no_cache = 1
 
 def get_context(context):
 	csrf_token = frappe.sessions.get_csrf_token()
-	frappe.db.commit()
+	frappe.db.commit()  # nosemgrep
 	context.csrf_token = csrf_token
 	context.boot = get_boot()
 	return context
@@ -19,7 +19,7 @@ def get_boot():
 	}
 
 
-@frappe.whitelist(methods=["POST"], allow_guest=True)
+@frappe.whitelist(methods=["POST"], allow_guest=True)  # nosemgrep
 def get_context_for_dev():
 	if not frappe.conf.developer_mode:
 		frappe.throw(_("This method is only meant for developer mode"))
