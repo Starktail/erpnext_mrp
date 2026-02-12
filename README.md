@@ -5,15 +5,15 @@
 
 # MRP Tools for ERPNext
 
-**Material Requirements Planning (MRP) app for ERPNext**
+**MRP (Material Requirements Planning) Tools for ERPNext**
 ![demo screenshot](docs/images/workbench.png)
 </div>
 
 
 ### MRP Tools for ERPNext
 
-![CI workflow](#)
-![codecov](#)
+[![CI](https://github.com/Starktail/erpnext_mrp/actions/workflows/ci.yml/badge.svg)](https://github.com/Starktail/erpnext_mrp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/github/Starktail/erpnext_mrp/graph/badge.svg?token=95AOLS2KLR)](https://codecov.io/github/Starktail/erpnext_mrp)
 
 MRP Tools for ERPNext
 
@@ -34,7 +34,7 @@ MIT
 
 ### User documentation
 
-📄 [MRP Tools for ERPNext Documentation](https://erpnext-mrp-docs.starktail.com/erpnextmrp_introduction)
+📄 [MRP Tools for ERPNext Documentation](https://erpnext-mrp-docs.starktail.com/erpnext_mrp_introduction)
 
 ### Installation
 

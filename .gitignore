@@ -3,17 +3,19 @@
 *.egg-info
 *.swp
 tags
-node_modules
-__pycache__
 erpnext_mrp/docs/current
 node_modules/
 cypress/videos
 cypress/screenshots
-
-dist/
-erpnext_mrp/public/erpnext_mrp
 erpnext_mrp/public/node_modules
-erpnext_mrp/www/erpnext_mrp.html
 
+# Package management is managed by bench
+yarn.lock
+
+# Docs
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# Frontend artifacts
+dist/
+erpnext_mrp/public/erpnext_mrp
