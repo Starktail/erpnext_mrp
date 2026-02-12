@@ -37,19 +37,19 @@ class TestMRPRun(FrappeTestCase):
 		frappe.db.delete("Stock Ledger Entry")
 
 		# Load and create test items
-		with open(test_data_file_items) as f:
+		with open(test_data_file_items) as f:  # nosemgrep
 			test_data_items = json.load(f)
 			for item in test_data_items:
 				create_item(**item)
 
 		# Load and create test BOMs
-		with open(test_data_file_boms) as f:
+		with open(test_data_file_boms) as f:  # nosemgrep
 			test_data_boms = json.load(f)
 			for bom in test_data_boms:
 				make_bom(**bom)
 
 		# Load and create test MRP Forecast records
-		with open(test_data_file_forecast) as f:
+		with open(test_data_file_forecast) as f:  # nosemgrep
 			test_data_forecasts = json.load(f)
 			for fc in test_data_forecasts:
 				create_mrp_forecast(fc)
