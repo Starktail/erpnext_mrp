@@ -25,7 +25,9 @@ class MRPSettings(Document):
 
 	@frappe.whitelist()
 	@redis_cache(ttl=600)
-	def get_docfields(self, doctype: str, field_type: str | None = None, mandatory_fields_only: bool | None = False) -> list[dict]:
+	def get_docfields(
+		self, doctype: str, field_type: str | None = None, mandatory_fields_only: bool | None = False
+	) -> list[dict]:
 		"""
 		Get a list of DocFields for the given Doctype
 		"""
@@ -39,9 +41,15 @@ class MRPSettings(Document):
 			"Table",
 			"Table MultiSelect",
 		]
-		field_type_filter = ["fieldtype", "=", field_type] if field_type else ["fieldtype", "not in", invalid_field_types]
+		field_type_filter = (
+			["fieldtype", "=", field_type] if field_type else ["fieldtype", "not in", invalid_field_types]
+		)
 		mandatory_fields_filters = [["reqd", "=", "1"]] if mandatory_fields_only else []
-		docfields = frappe.get_all("DocField", fields=["label", "name", "fieldname"], filters=[field_type_filter, ["parent", "=", doctype], *mandatory_fields_filters])
+		docfields = frappe.get_all(
+			"DocField",
+			fields=["label", "name", "fieldname"],
+			filters=[field_type_filter, ["parent", "=", doctype], *mandatory_fields_filters],
+		)
 		custom_fields = frappe.get_all(
 			"Custom Field",
 			fields=["label", "name", "fieldname"],
