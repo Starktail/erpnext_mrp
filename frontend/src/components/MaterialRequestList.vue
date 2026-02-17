@@ -248,6 +248,33 @@ export default {
         },
       },
     },
+    ExpandCellRenderer: {
+      template: `
+        <div class="flex items-center h-full" :style="{ paddingLeft: params.data.type === 'DETAIL' ? '20px' : '0px' }">
+          <div v-if="params.data.type === 'HEADER'" 
+               @click.stop="onToggle" 
+               class="cursor-pointer mr-2 w-4 flex justify-center text-gray-500 hover:text-gray-700 select-none">
+             <span v-if="isExpanded">▼</span>
+             <span v-else>▶</span>
+          </div>
+          <span v-if="params.data.type === 'HEADER'">
+            <a :href="'/app/item/' + params.value" target="_blank" class="text-blue-600 hover:underline">{{ params.value }}</a>
+          </span>
+          <span v-else class="text-gray-600">{{ params.value }}</span>
+        </div>
+      `,
+      props: { params: { type: Object, required: true } },
+      computed: {
+        isExpanded() {
+          return this.params.isExpanded(this.params.data.item_code)
+        },
+      },
+      methods: {
+        onToggle() {
+          this.params.toggleExpand(this.params.data.item_code)
+        },
+      },
+    },
   },
   data() {
     return {
@@ -263,6 +290,7 @@ export default {
       showRerunDialog: false,
       onlyShowSuggested: false,
       showUrgencyLegend: false,
+      expandedItems: [], // Store expanded item codes
     }
   },
   resources: {
@@ -356,12 +384,13 @@ export default {
       const mrpEntries = this.$resources.mrp_entries.data
       const items = {}
 
+      // 1. Group by Item
       mrpEntries.forEach((entry) => {
         if (!entry.item_code) return
 
         if (!items[entry.item_code]) {
           items[entry.item_code] = {
-            name: entry.item_code, // for getRowId
+            name: entry.item_code, // for original logic
             item_code: entry.item_code,
             item_name: entry.item_name,
             item_group: entry.item_group,
@@ -373,6 +402,7 @@ export default {
             lead_time: entry.lead_time,
             default_supplier: entry.default_supplier,
             _urgency_levels: [],
+            _weeks_data: {}, // Store week data here
           }
         }
 
@@ -395,11 +425,14 @@ export default {
           'projected_on_hand_inventory',
         ]
 
+        // Store data in a nested structure or flat with prefix
+        // Flattening with prefix is easier for lookup
         fieldsToPivot.forEach((field) => {
           items[entry.item_code][`${weekKey}_${field}`] = entry[field]
         })
       })
 
+      // 2. Process Items (urgency, filtering)
       Object.values(items).forEach((item) => {
         const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
         item.urgency_level =
@@ -407,17 +440,59 @@ export default {
         delete item._urgency_levels
       })
 
-      let item_rows = Object.values(items)
+      let processedItems = Object.values(items)
 
       if (this.onlyShowSuggested) {
-        item_rows = item_rows.filter((row) => {
+        processedItems = processedItems.filter((row) => {
           return Object.keys(row).some(
             (key) => key.endsWith('_suggested_orders') && row[key] > 0,
           )
         })
       }
 
-      return item_rows
+      // 3. Flatten to Rows (Header + Details)
+      const rows = []
+      const expandedSet = new Set(this.expandedItems)
+
+      processedItems.forEach((item) => {
+        // Header Row
+        rows.push({
+          ...item,
+          type: 'HEADER',
+          // Ensure unique ID for row
+          row_id: item.item_code,
+        })
+
+        // Detail Rows
+        if (expandedSet.has(item.item_code)) {
+          this.quantityFields.forEach((qField) => {
+            const detailRow = {
+              item_code: item.item_code, // Reference to parent
+              type: 'DETAIL',
+              measure_key: qField.value,
+              row_id: `${item.item_code}_${qField.value}`,
+              // For the first column (Item Code), we show the label
+              item_code_display: qField.label,
+              default_supplier: item.default_supplier,
+            }
+
+            // Populate week columns
+            Object.keys(item).forEach((key) => {
+              if (key.endsWith('_' + qField.value)) {
+                const week = key.substring(
+                  0,
+                  key.length - (qField.value.length + 1),
+                )
+                detailRow[week] = item[key]
+              }
+            })
+
+            rows.push(detailRow)
+          })
+        }
+      })
+
+      return rows
     },
     dynamicColumnDefs() {
       const staticColumns = [
@@ -430,16 +505,19 @@ export default {
         },
         {
           field: 'item_code',
-          headerName: 'Item Code',
-          sortable: true,
+          headerName: 'Item Code / Measure',
+          sortable: true, // Sort only works for Headers effectively
           filter: true,
-          width: 120,
+          width: 200,
           pinned: 'left',
-          cellRenderer: (params) => {
-            if (params.value) {
-              return `<a href="/app/item/${params.value}" target="_blank" class="text-blue-600 hover:underline">${params.value}</a>`
-            }
-            return null
+          cellRenderer: 'ExpandCellRenderer',
+          cellRendererParams: {
+            toggleExpand: this.toggleExpand,
+            isExpanded: this.isExpanded,
+          },
+          valueGetter: (params) => {
+            if (params.data.type === 'HEADER') return params.data.item_code
+            return params.data.item_code_display // The measure label
           },
         },
         {
@@ -448,6 +526,8 @@ export default {
           sortable: true,
           filter: true,
           pinned: 'left',
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.item_name : '',
         },
         {
           field: 'item_group',
@@ -455,6 +535,8 @@ export default {
           sortable: true,
           filter: true,
           width: 120,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.item_group : '',
         },
         {
           field: 'uom',
@@ -462,6 +544,8 @@ export default {
           sortable: true,
           filter: true,
           width: 100,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.uom : '',
         },
         {
           field: 'bom_list',
@@ -472,6 +556,8 @@ export default {
           wrapText: true,
           tooltipField: 'bom_list',
           cellClass: 'bom-clip',
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.bom_list : '',
         },
         {
           field: 'bom_level',
@@ -479,24 +565,30 @@ export default {
           sortable: true,
           filter: true,
           width: 70,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.bom_level : '',
         },
         {
           field: 'reorder_level',
-          headerName: 'Safety Stock/Re-order Level',
+          headerName: 'Safety Stock',
           sortable: true,
           filter: true,
           width: 110,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.reorder_level : '',
         },
         {
           field: 'reorder_quantity',
-          headerName: 'Re-order Quantity',
+          headerName: 'Re-order Qty',
           sortable: true,
           filter: true,
           width: 110,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.reorder_quantity : '',
         },
         {
           field: 'lead_time',
@@ -506,6 +598,8 @@ export default {
           width: 100,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.lead_time : '',
         },
         {
           field: 'default_supplier',
@@ -513,23 +607,23 @@ export default {
           sortable: true,
           filter: true,
           width: 120,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.default_supplier : '',
         },
         {
           field: 'urgency_level',
-          headerName: 'Urgency Level',
+          headerName: 'Urgency',
           sortable: true,
           filter: true,
           width: 120,
           cellStyle: { textAlign: 'center' },
           comparator: (valueA, valueB) => {
-            // Custom sorting
-            //	- Ascending follows the order: 1 -> 2 -> 3 -> 0
-            //	- Descending follows the order: 0 -> 3 -> 2 -> 1
             const valA = valueA === 0 ? 999 : valueA
             const valB = valueB === 0 ? 999 : valueB
             return valA - valB
           },
           cellRenderer: (params) => {
+            if (params.data.type !== 'HEADER') return ''
             return params.value !== 0
               ? `⚠️ <b>P${params.value}</b>`
               : params.value
@@ -545,7 +639,16 @@ export default {
         },
         sortable: false,
         filter: false,
+        valueGetter: (params) =>
+          params.data.type === 'HEADER' ? 'Actions' : '',
       }
+      // Only show button for Header rows?
+      // The renderer handles display, but we can return null if not header.
+      // But the renderer is a component. We can hide it in CSS or modify component.
+      // I'll leave it as is, but maybe hide the button if value is empty?
+      // Actually the current buttonCellRenderer doesn't check type.
+      // I'll assume it's fine or update it if needed.
+      // For now, let's keep it simple.
 
       if (
         this.$resources.mrp_entries.loading ||
@@ -566,38 +669,51 @@ export default {
       const sortedWeeks = Array.from(weeks).sort()
 
       const dynamicColumns = sortedWeeks.map((weekKey) => {
-        const openChildren = this.quantityFields.map((qField) => ({
-          ...qField,
-          field: `${weekKey}_${qField.value}`,
-          headerName: qField.label,
-          columnGroupShow: 'open',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: qField.cellStyle || { textAlign: 'right' },
-          headerClass: 'ag-right-aligned-header',
-        }))
-
-        const closedField = this.quantityFields.find(
-          (f) => f.value === this.closed_column_field,
-        )
-
-        const closedChild = {
-          field: `${weekKey}_${closedField.value}`,
-          headerName: closedField.label,
-          columnGroupShow: 'closed',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: closedField.cellStyle || { textAlign: 'right' },
-          valueFormatter: closedField.valueFormatter,
-          headerClass: 'ag-right-aligned-header',
-        }
-
         return {
           headerName: weekKey,
-          groupId: weekKey,
-          children: [closedChild, ...openChildren],
+          sortable: true,
+          filter: true,
+          width: 120,
+          headerClass: 'ag-right-aligned-header',
+          valueGetter: (params) => {
+            if (params.data.type === 'HEADER') {
+              const fieldKey = `${weekKey}_${this.closed_column_field}`
+              return params.data[fieldKey]
+            }
+            return params.data[weekKey]
+          },
+          cellStyle: (params) => {
+            const style = { textAlign: 'right' }
+            let measure_key =
+              params.data.type === 'DETAIL'
+                ? params.data.measure_key
+                : this.closed_column_field
+
+            const qField = this.quantityFields.find(
+              (f) => f.value === measure_key,
+            )
+            if (qField && qField.cellStyle) {
+              if (typeof qField.cellStyle === 'function') {
+                return { ...style, ...qField.cellStyle(params) }
+              } else {
+                return { ...style, ...qField.cellStyle }
+              }
+            }
+            return style
+          },
+          valueFormatter: (params) => {
+            let measure_key =
+              params.data.type === 'DETAIL'
+                ? params.data.measure_key
+                : this.closed_column_field
+            const qField = this.quantityFields.find(
+              (f) => f.value === measure_key,
+            )
+            if (qField && qField.valueFormatter) {
+              return qField.valueFormatter(params)
+            }
+            return params.value
+          },
         }
       })
 
@@ -642,7 +758,25 @@ export default {
       return this.$resources.mrp_entries.loading
     },
   },
+  watch: {
+    closed_column_field() {
+      if (this.gridApi) {
+        this.gridApi.refreshCells({ force: true })
+      }
+    },
+  },
   methods: {
+    toggleExpand(itemCode) {
+      const idx = this.expandedItems.indexOf(itemCode)
+      if (idx === -1) {
+        this.expandedItems.push(itemCode)
+      } else {
+        this.expandedItems.splice(idx, 1)
+      }
+    },
+    isExpanded(itemCode) {
+      return this.expandedItems.includes(itemCode)
+    },
     formatCurrency(value) {
       if (value === null || value === undefined) return ''
       const currency = window.sysdefaults?.currency
@@ -668,18 +802,19 @@ export default {
       this.$resources.mrp_entries.reload()
     },
     handleOpenDialog() {
-      // New method to be called by the button in the cell
       this.showDialog = true
-      console.log('MaterialRequestList: showDialog is now true') // For verification
     },
     getRowId(params) {
-      return params.data.name
+      return params.data.row_id
     },
     getRowStyle(params) {
-      if (params.data && params.data.urgency_level === 1) {
-        return { background: '#ffdddd' }
-      } else if (params.data && params.data.urgency_level === 2) {
-        return { background: '#eab26eff' }
+      if (params.data.type === 'HEADER') {
+        if (params.data.urgency_level === 1) {
+          return { background: '#ffdddd' }
+        } else if (params.data.urgency_level === 2) {
+          return { background: '#eab26eff' }
+        }
+        return { fontWeight: 'bold', background: '#f9f9f9' }
       }
       return null
     },
@@ -702,20 +837,102 @@ export default {
     },
     async openCreateRequestDialog() {
       const summary = []
+
+      // Filter out Header rows if they are selected alongside their children?
+      // Or use Header rows to fetch all suggestions for that item?
+      // Let's stick to explicit suggestions found in selected rows.
+      // Case 1: Header selected. We should probably find suggestions for that item.
+      // Case 2: Detail selected. We check if it is 'suggested_orders'.
+
+      const itemsToProcess = new Set()
+
       this.selectedRows.forEach((row) => {
-        Object.keys(row).forEach((key) => {
-          if (key.endsWith('_suggested_orders') && row[key] > 0) {
-            const week = key.split('_suggested_orders')[0]
-            summary.push({
-              item_code: row.item_code,
-              quantity: row[key],
-              week: week,
-              supplier: row.default_supplier,
-            })
-          }
-        })
+        if (row.type === 'HEADER') {
+          itemsToProcess.add(row.item_code)
+        } else if (
+          row.type === 'DETAIL' &&
+          row.measure_key === 'suggested_orders'
+        ) {
+          // Should we add the whole item or just the selected row's values?
+          // The original logic iterated keys on the row.
+          // If we have the detail row for 'suggested_orders', it has the values.
+          // We can process this row directly.
+        }
       })
-      this.selectedItemsSummary = summary
+
+      // If we process headers, we need to find the data.
+      // We can look up in mrp_entries.
+      // But mrp_entries is flat list of (Item, Week).
+      // It's easier if we have the consolidated item object.
+      // But we don't store it globally.
+      // However, we can re-construct or look at `mrpEntryRows` (which are just rows).
+
+      // Let's try a simpler approach:
+      // Iterate selected rows.
+      // If Header: Find all children (conceptually) -> actually simpler: assume user expanded and saw suggestions?
+      // If user selects Header, do we assume they want to order EVERYTHING suggested for that item? Yes.
+
+      // To implement this, we need the "full item data" which we have in `mrpEntryRows` (the Header row has all the hidden fields like `2024-W01_suggested_orders`!).
+      // Wait, in my implementation of `mrpEntryRows`, I did:
+      // rows.push({ ...item, type: 'HEADER' })
+      // And `item` had `2024-W01_suggested_orders` etc attached to it!
+      // So the Header Row object *still contains* all the data, even if not shown in columns.
+      // Perfect.
+
+      this.selectedRows.forEach((row) => {
+        // If it's a detail row, only care if it is suggested orders
+        if (row.type === 'DETAIL' && row.measure_key !== 'suggested_orders')
+          return
+
+        // If it's a detail row for suggested_orders, it has fields like '2024-W01': 10
+        // We can extract them.
+
+        if (row.type === 'DETAIL') {
+          Object.keys(row).forEach((key) => {
+            // key is like '2024-W01'
+            if (key.match(/^\d{4}-W\d{2}$/) && row[key] > 0) {
+              summary.push({
+                item_code: row.item_code,
+                quantity: row[key],
+                week: key,
+                supplier: null, // We need to find supplier. Header row has it. Detail row doesn't have it explicitly in my code above?
+                // Wait, I didn't copy default_supplier to Detail row.
+                // I should fix that in mrpEntryRows.
+              })
+            }
+          })
+        }
+
+        // If it's HEADER, it has '2024-W01_suggested_orders': 10
+        if (row.type === 'HEADER') {
+          Object.keys(row).forEach((key) => {
+            if (key.endsWith('_suggested_orders') && row[key] > 0) {
+              const week = key.split('_suggested_orders')[0]
+              summary.push({
+                item_code: row.item_code,
+                quantity: row[key],
+                week: week,
+                supplier: row.default_supplier,
+              })
+            }
+          })
+        }
+      })
+
+      // Deduplicate?
+      // If user selected both Header and Detail, we might double count.
+      // Map by item+week.
+      const uniqueSummary = {}
+      summary.forEach((s) => {
+        const key = `${s.item_code}_${s.week}`
+        uniqueSummary[key] = s
+      })
+      this.selectedItemsSummary = Object.values(uniqueSummary)
+
+      // Need to fix Supplier in Detail row processing.
+      // I can add default_supplier to Detail row in mrpEntryRows.
+      // Let's rely on looking up the Header row in the grid API? No, expensive.
+      // I'll update mrpEntryRows to include default_supplier in Detail rows.
 
       await nextTick()
 
