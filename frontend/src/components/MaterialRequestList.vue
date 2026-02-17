@@ -44,7 +44,7 @@
       class="ag-theme-alpine w-full flex-grow"
       theme="legacy"
       :columnDefs="dynamicColumnDefs"
-      :rowData="mrpEntryRows"
+      :rowData="gridData"
       :pagination="true"
       :paginationPageSize="100"
       :getRowId="getRowId"
@@ -52,6 +52,7 @@
         wrapHeaderText: true,
         autoHeaderHeight: true,
         resizable: true,
+        sortable: false,
       }"
       :getRowStyle="getRowStyle"
       :tooltipShowDelay="300"
@@ -214,7 +215,7 @@
 </template>
 
 <script>
-import { nextTick } from 'vue'
+import { nextTick, shallowRef } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 // AG Grid CSS is now imported in main.js
 import { Button, Dialog, Combobox, Checkbox, call, toast } from 'frappe-ui'
@@ -291,6 +292,7 @@ export default {
       onlyShowSuggested: false,
       showUrgencyLegend: false,
       expandedItems: [], // Store expanded item codes
+      gridData: shallowRef([]), // Use shallowRef for performance
     }
   },
   resources: {
@@ -326,7 +328,8 @@ export default {
         start: 0,
         pageLength: 500,
         auto: true,
-        onSuccess() {
+        onSuccess: (data) => {
+          this.updateGridData(data)
           if (this.$resources.mrp_entries.hasNextPage) {
             this.$resources.mrp_entries.next()
           }
@@ -373,127 +376,6 @@ export default {
       }
       return 'MRP has not run yet.'
     },
-    mrpEntryRows() {
-      if (
-        this.$resources.mrp_entries.loading ||
-        !this.$resources.mrp_entries.data
-      ) {
-        return null // AG Grid will show its loading overlay
-      }
-
-      const mrpEntries = this.$resources.mrp_entries.data
-      const items = {}
-
-      // 1. Group by Item
-      mrpEntries.forEach((entry) => {
-        if (!entry.item_code) return
-
-        if (!items[entry.item_code]) {
-          items[entry.item_code] = {
-            name: entry.item_code, // for original logic
-            item_code: entry.item_code,
-            item_name: entry.item_name,
-            item_group: entry.item_group,
-            bom_list: entry.bom_list,
-            uom: entry.uom,
-            bom_level: entry.bom_level,
-            reorder_level: entry.reorder_level,
-            reorder_quantity: entry.reorder_quantity,
-            lead_time: entry.lead_time,
-            default_supplier: entry.default_supplier,
-            _urgency_levels: [],
-            _weeks_data: {}, // Store week data here
-          }
-        }
-
-        items[entry.item_code]._urgency_levels.push(entry.urgency_level)
-
-        if (!entry.target_date) return
-
-        const [year, week] = this.getWeekNumber(new Date(entry.target_date))
-        const weekKey = `${year}-W${String(week).padStart(2, '0')}`
-
-        const fieldsToPivot = [
-          'on_hand_inventory',
-          'open_orders',
-          'total_forecast_demand',
-          'scheduled_receipts',
-          'suggested_receipts',
-          'suggested_orders',
-          'suggested_orders_value',
-          'suggested_orders_value_payable',
-          'projected_on_hand_inventory',
-        ]
-
-        // Store data in a nested structure or flat with prefix
-        // Flattening with prefix is easier for lookup
-        fieldsToPivot.forEach((field) => {
-          items[entry.item_code][`${weekKey}_${field}`] = entry[field]
-        })
-      })
-
-      // 2. Process Items (urgency, filtering)
-      Object.values(items).forEach((item) => {
-        const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
-        item.urgency_level =
-          positiveUrgencies.length > 0 ? Math.min(...positiveUrgencies) : 0
-        delete item._urgency_levels
-      })
-
-      let processedItems = Object.values(items)
-
-      if (this.onlyShowSuggested) {
-        processedItems = processedItems.filter((row) => {
-          return Object.keys(row).some(
-            (key) => key.endsWith('_suggested_orders') && row[key] > 0,
-          )
-        })
-      }
-
-      // 3. Flatten to Rows (Header + Details)
-      const rows = []
-      const expandedSet = new Set(this.expandedItems)
-
-      processedItems.forEach((item) => {
-        // Header Row
-        rows.push({
-          ...item,
-          type: 'HEADER',
-          // Ensure unique ID for row
-          row_id: item.item_code,
-        })
-
-        // Detail Rows
-        if (expandedSet.has(item.item_code)) {
-          this.quantityFields.forEach((qField) => {
-            const detailRow = {
-              item_code: item.item_code, // Reference to parent
-              type: 'DETAIL',
-              measure_key: qField.value,
-              row_id: `${item.item_code}_${qField.value}`,
-              // For the first column (Item Code), we show the label
-              item_code_display: qField.label,
-              default_supplier: item.default_supplier,
-            }
-
-            // Populate week columns
-            Object.keys(item).forEach((key) => {
-              if (key.endsWith('_' + qField.value)) {
-                const week = key.substring(
-                  0,
-                  key.length - (qField.value.length + 1),
-                )
-                detailRow[week] = item[key]
-              }
-            })
-
-            rows.push(detailRow)
-          })
-        }
-      })
-
-      return rows
-    },
     dynamicColumnDefs() {
       const staticColumns = [
         {
@@ -506,7 +388,7 @@ export default {
         {
           field: 'item_code',
           headerName: 'Item Code / Measure',
-          sortable: true, // Sort only works for Headers effectively
+          sortable: true,
           filter: true,
           width: 200,
           pinned: 'left',
@@ -642,13 +524,6 @@ export default {
         valueGetter: (params) =>
           params.data.type === 'HEADER' ? 'Actions' : '',
       }
-      // Only show button for Header rows?
-      // The renderer handles display, but we can return null if not header.
-      // But the renderer is a component. We can hide it in CSS or modify component.
-      // I'll leave it as is, but maybe hide the button if value is empty?
-      // Actually the current buttonCellRenderer doesn't check type.
-      // I'll assume it's fine or update it if needed.
-      // For now, let's keep it simple.
 
       if (
         this.$resources.mrp_entries.loading ||
@@ -706,6 +581,17 @@ export default {
               params.data.type === 'DETAIL'
                 ? params.data.measure_key
                 : this.closed_column_field
+
+            // Show blank instead of 0 for most measures
+            if (
+              params.value === 0 &&
+              !['on_hand_inventory', 'projected_on_hand_inventory'].includes(
+                measure_key,
+              )
+            ) {
+              return ''
+            }
+
             const qField = this.quantityFields.find(
               (f) => f.value === measure_key,
             )
@@ -764,14 +650,154 @@ export default {
         this.gridApi.refreshCells({ force: true })
       }
     },
+    onlyShowSuggested() {
+      // Re-process when filter changes
+      this.updateGridData(this.$resources.mrp_entries.data)
+    },
   },
   methods: {
+    updateGridData(mrpEntries) {
+      if (!mrpEntries) return
+
+      const items = {}
+
+      // 1. Group by Item
+      mrpEntries.forEach((entry) => {
+        if (!entry.item_code) return
+
+        if (!items[entry.item_code]) {
+          items[entry.item_code] = {
+            name: entry.item_code,
+            item_code: entry.item_code,
+            item_name: entry.item_name,
+            item_group: entry.item_group,
+            bom_list: entry.bom_list,
+            uom: entry.uom,
+            bom_level: entry.bom_level,
+            reorder_level: entry.reorder_level,
+            reorder_quantity: entry.reorder_quantity,
+            lead_time: entry.lead_time,
+            default_supplier: entry.default_supplier,
+            _urgency_levels: [],
+          }
+        }
+
+        items[entry.item_code]._urgency_levels.push(entry.urgency_level)
+
+        if (!entry.target_date) return
+
+        const [year, week] = this.getWeekNumber(new Date(entry.target_date))
+        const weekKey = `${year}-W${String(week).padStart(2, '0')}`
+
+        const fieldsToPivot = [
+          'on_hand_inventory',
+          'open_orders',
+          'total_forecast_demand',
+          'scheduled_receipts',
+          'suggested_receipts',
+          'suggested_orders',
+          'suggested_orders_value',
+          'suggested_orders_value_payable',
+          'projected_on_hand_inventory',
+        ]
+
+        fieldsToPivot.forEach((field) => {
+          items[entry.item_code][`${weekKey}_${field}`] = entry[field]
+        })
+      })
+
+      // 2. Process Items
+      Object.values(items).forEach((item) => {
+        const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
+        item.urgency_level =
+          positiveUrgencies.length > 0 ? Math.min(...positiveUrgencies) : 0
+        delete item._urgency_levels
+      })
+
+      let processedItems = Object.values(items)
+
+      if (this.onlyShowSuggested) {
+        processedItems = processedItems.filter((row) => {
+          return Object.keys(row).some(
+            (key) => key.endsWith('_suggested_orders') && row[key] > 0,
+          )
+        })
+      }
+
+      // 3. Build Rows (Headers + currently expanded details)
+      const rows = []
+      const expandedSet = new Set(this.expandedItems)
+
+      processedItems.forEach((item) => {
+        // Header Row
+        rows.push({
+          ...item,
+          type: 'HEADER',
+          row_id: item.item_code,
+        })
+
+        // Detail Rows (if expanded)
+        if (expandedSet.has(item.item_code)) {
+          const detailRows = this.createDetailRows(item)
+          rows.push(...detailRows)
+        }
+      })
+
+      this.gridData = rows
+    },
+    createDetailRows(item) {
+      const detailRows = []
+      this.quantityFields.forEach((qField) => {
+        const detailRow = {
+          item_code: item.item_code,
+          type: 'DETAIL',
+          measure_key: qField.value,
+          row_id: `${item.item_code}_${qField.value}`,
+          item_code_display: qField.label,
+          default_supplier: item.default_supplier,
+        }
+
+        Object.keys(item).forEach((key) => {
+          if (key.endsWith('_' + qField.value)) {
+            const week = key.substring(
+              0,
+              key.length - (qField.value.length + 1),
+            )
+            detailRow[week] = item[key]
+          }
+        })
+        detailRows.push(detailRow)
+      })
+      return detailRows
+    },
     toggleExpand(itemCode) {
       const idx = this.expandedItems.indexOf(itemCode)
+      const headerNode = this.gridApi.getRowNode(itemCode)
+
+      if (!headerNode) {
+        console.warn('Header node not found for expansion', itemCode)
+        return
+      }
+
       if (idx === -1) {
+        // Expand
         this.expandedItems.push(itemCode)
+        const detailRows = this.createDetailRows(headerNode.data)
+        this.gridApi.applyTransaction({
+          add: detailRows,
+          addIndex: headerNode.rowIndex + 1,
+        })
       } else {
+        // Collapse
         this.expandedItems.splice(idx, 1)
+        // Need to find the specific detail rows to remove
+        const rowsToRemove = []
+        this.quantityFields.forEach((qField) => {
+          const rowId = `${itemCode}_${qField.value}`
+          const node = this.gridApi.getRowNode(rowId)
+          if (node) rowsToRemove.push(node.data)
+        })
+        this.gridApi.applyTransaction({ remove: rowsToRemove })
       }
     },
     isExpanded(itemCode) {
@@ -838,46 +864,13 @@ export default {
     async openCreateRequestDialog() {
       const summary = []
 
-      // Filter out Header rows if they are selected alongside their children?
-      // Or use Header rows to fetch all suggestions for that item?
-      // Let's stick to explicit suggestions found in selected rows.
-      // Case 1: Header selected. We should probably find suggestions for that item.
-      // Case 2: Detail selected. We check if it is 'suggested_orders'.
-
       const itemsToProcess = new Set()
 
       this.selectedRows.forEach((row) => {
         if (row.type === 'HEADER') {
           itemsToProcess.add(row.item_code)
-        } else if (
-          row.type === 'DETAIL' &&
-          row.measure_key === 'suggested_orders'
-        ) {
-          // Should we add the whole item or just the selected row's values?
-          // The original logic iterated keys on the row.
-          // If we have the detail row for 'suggested_orders', it has the values.
-          // We can process this row directly.
         }
       })
-
-      // If we process headers, we need to find the data.
-      // We can look up in mrp_entries.
-      // But mrp_entries is flat list of (Item, Week).
-      // It's easier if we have the consolidated item object.
-      // But we don't store it globally.
-      // However, we can re-construct or look at `mrpEntryRows` (which are just rows).
-
-      // Let's try a simpler approach:
-      // Iterate selected rows.
-      // If Header: Find all children (conceptually) -> actually simpler: assume user expanded and saw suggestions?
-      // If user selects Header, do we assume they want to order EVERYTHING suggested for that item? Yes.
-
-      // To implement this, we need the "full item data" which we have in `mrpEntryRows` (the Header row has all the hidden fields like `2024-W01_suggested_orders`!).
-      // Wait, in my implementation of `mrpEntryRows`, I did:
-      // rows.push({ ...item, type: 'HEADER' })
-      // And `item` had `2024-W01_suggested_orders` etc attached to it!
-      // So the Header Row object *still contains* all the data, even if not shown in columns.
-      // Perfect.
 
       this.selectedRows.forEach((row) => {
         // If it's a detail row, only care if it is suggested orders
@@ -895,9 +888,7 @@ export default {
                 item_code: row.item_code,
                 quantity: row[key],
                 week: key,
-                supplier: null, // We need to find supplier. Header row has it. Detail row doesn't have it explicitly in my code above?
-                // Wait, I didn't copy default_supplier to Detail row.
-                // I should fix that in mrpEntryRows.
+                supplier: null,
               })
             }
           })
@@ -928,11 +919,6 @@ export default {
         uniqueSummary[key] = s
       })
       this.selectedItemsSummary = Object.values(uniqueSummary)
-
-      // Need to fix Supplier in Detail row processing.
-      // I can add default_supplier to Detail row in mrpEntryRows.
-      // Let's rely on looking up the Header row in the grid API? No, expensive.
-      // I'll update mrpEntryRows to include default_supplier in Detail rows.
 
       await nextTick()
 
