@@ -50,10 +50,10 @@
       :getRowId="getRowId"
       :defaultColDef="{
         wrapHeaderText: true,
-        autoHeaderHeight: true,
         resizable: true,
         sortable: false,
       }"
+      :headerHeight="150"
       :getRowStyle="getRowStyle"
       :tooltipShowDelay="300"
       :tooltipHideDelay="2000"
@@ -379,7 +379,7 @@ export default {
     dynamicColumnDefs() {
       const staticColumns = [
         {
-          headerName: 'Select',
+          headerName: '',
           checkboxSelection: true,
           headerCheckboxSelection: true,
           pinned: 'left',
@@ -545,11 +545,11 @@ export default {
 
       const dynamicColumns = sortedWeeks.map((weekKey) => {
         return {
-          headerName: weekKey,
-          sortable: true,
-          filter: true,
-          width: 120,
-          headerClass: 'ag-right-aligned-header',
+          headerName: this.getFormattedWeekHeader(weekKey),
+          sortable: false,
+          filter: false,
+          width: 40,
+          headerClass: 'rotated-header',
           valueGetter: (params) => {
             if (params.data.type === 'HEADER') {
               const fieldKey = `${weekKey}_${this.closed_column_field}`
@@ -656,6 +656,14 @@ export default {
     },
   },
   methods: {
+    getFormattedWeekHeader(weekKey) {
+      const [year, weekNum] = weekKey.split('-W').map(Number)
+      const mondayDateStr = this.getDateFromWeek(weekKey) // YYYY-MM-DD
+      if (!mondayDateStr) return weekKey
+      const [y, m, d] = mondayDateStr.split('-')
+      // Format as CW 7 | 14-02-26
+      return `CW ${weekNum} | ${d}-${m}-${y.slice(-2)}`
+    },
     updateGridData(mrpEntries) {
       if (!mrpEntries) return
 
@@ -996,46 +1004,29 @@ export default {
   line-height: 1.2;
 }
 
-.ag-theme-alpine .ag-cell-label-container {
-  flex-direction: row;
-  flex-wrap: wrap;
-}
-
-.ag-theme-alpine .ag-header-cell-label {
-  display: contents;
-}
-
-.ag-theme-alpine .ag-header-cell-filter-button {
-  order: 1;
-  margin-right: 4px;
-}
-
-.ag-theme-alpine .ag-sort-indicator-container {
-  order: 2;
-}
-
-.ag-theme-alpine .ag-header-cell-text {
-  order: 3;
-  width: 100%;
-  margin-top: 2px;
-}
-
-.ag-theme-alpine .ag-right-aligned-header .ag-cell-label-container {
-  justify-content: flex-end;
-}
-
-.ag-theme-alpine .ag-right-aligned-header .ag-header-cell-text {
-  text-align: right;
-}
-
 .ag-theme-alpine {
   z-index: 0;
 }
 
-.ag-cell-not-inline-editing {
-  user-select: initial;
-  -moz-user-select: text;
-  -ms-user-select: text;
-  -webkit-user-select: text;
+.ag-header-row {
+  overflow: visible !important;
+}
+
+.ag-theme-alpine .ag-header-cell.rotated-header .ag-header-cell-label {
+  height: 100%;
+  padding: 0 !important;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: visible !important;
+  padding-left: 0 !important;
+}
+
+.ag-theme-alpine .ag-header-cell.rotated-header .ag-header-cell-text {
+  width: 30px;
+  transform: rotate(-90deg);
+  display: inline-block;
+  white-space: nowrap;
+  overflow: visible !important;
 }
 </style>
