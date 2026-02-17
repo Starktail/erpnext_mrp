@@ -1031,4 +1031,11 @@ export default {
 .ag-theme-alpine {
   z-index: 0;
 }
+
+.ag-cell-not-inline-editing {
+  user-select: initial;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  -webkit-user-select: text;
+}
 </style>
