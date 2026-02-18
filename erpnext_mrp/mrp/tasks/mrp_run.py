@@ -984,34 +984,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 						mrp_entry_docs[index - weeks_before].suggested_orders or 0
 					) + entry.suggested_receipts
 
-		# Determine Level of Urgency
-		# Level 1: Required in first week and not enough On Order (excl safety stock)
-		# Current SoH + Total scheduled_receipts < total demand and no suggested orders for period 0
-		total_scheduled_receipts = sum([entry.scheduled_receipts for entry in mrp_entry_docs])
-		if (mrp_entry_docs[0].on_hand_inventory + total_scheduled_receipts < total_item_demand) and (
-			mrp_entry_docs[0].suggested_orders > 0
-		):
-			mrp_entry_docs[0].urgency_level = 1
-
-		# Level 2. Enough On Order, but late (excl safety stock)
-		# Current SoH + Total scheduled_receipts <= total demand (but no suggested orders for period 0)
-		# OR
-		# Somewhere we will run out of stock (aka any suggested_receipts_excl_reorder_level > 0)
-		elif (mrp_entry_docs[0].on_hand_inventory + total_scheduled_receipts < total_item_demand) or sum(
-			[entry.suggested_receipts_excl_reorder_level for entry in mrp_entry_docs]
-		) > 0:
-			mrp_entry_docs[0].urgency_level = 2
-
-		# Level 3. On order, but the stock level will drop below the safety stock level
-		# Current SoH + Total scheduled_receipts >= total demand
-		# AND
-		# Somewhere we will land below the safety stock level (aka suggested_receipts > 0)
-		elif sum([entry.suggested_receipts for entry in mrp_entry_docs]) > 0:
-			mrp_entry_docs[0].urgency_level = 3
-
-		else:
-			mrp_entry_docs[0].urgency_level = 0
-
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:
 			for entry in mrp_entry_docs:

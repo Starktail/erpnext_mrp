@@ -18,17 +18,6 @@
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
         <div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
-        <div
-          class="flex items-center gap-2 text-sm cursor-pointer"
-          @click="showUrgencyLegend = true"
-        >
-          <div class="w-4 h-4 rounded" style="background-color: #ffdddd"></div>
-          <div
-            class="w-4 h-4 rounded"
-            style="background-color: #eab26eff"
-          ></div>
-          <span class="text-gray-600 hover:underline">Urgency Legend</span>
-        </div>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
           <span class="text-gray-600">Suggested Order</span>
@@ -164,53 +153,6 @@
         <Button @click="showSuccessDialog = false">Close</Button>
       </template>
     </Dialog>
-    <Dialog v-model="showUrgencyLegend" @hide="showUrgencyLegend = false">
-      <template #body-title>
-        <h3 class="text-2xl font-semibold text-ink-gray-9">
-          Urgency Level Legend
-        </h3>
-      </template>
-      <template #body-content>
-        <div>
-          <p>The urgency level highlights items that require attention:</p>
-          <ul class="list-disc list-inside my-4 space-y-2">
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #ffdddd"
-              ></div>
-              <span
-                ><b>P1 - Critical:</b> Required and not enough quantity on order
-                (excl safety stock).</span
-              >
-            </li>
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #eab26eff"
-              ></div>
-              <span
-                ><b>P2 - Attention:</b> Enough quantity on order, but scheduled
-                to arrive late (excl safety stock).</span
-              >
-            </li>
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #888888ff"
-              ></div>
-              <span
-                ><b>P3 - Optional:</b> On order, but the stock level will drop
-                below the safety stock (no row highlight)</span
-              >
-            </li>
-          </ul>
-        </div>
-      </template>
-      <template #actions>
-        <Button @click="showUrgencyLegend = false">Close</Button>
-      </template>
-    </Dialog>
   </div>
 </template>
 
@@ -290,7 +232,6 @@ export default {
       newlyCreatedDocs: [],
       showRerunDialog: false,
       onlyShowSuggested: false,
-      showUrgencyLegend: false,
       expandedItems: [], // Store expanded item codes
       gridData: shallowRef([]), // Use shallowRef for performance
     }
@@ -312,9 +253,9 @@ export default {
           'reorder_quantity',
           'lead_time',
           'default_supplier',
-          'urgency_level',
           'target_date',
           'on_hand_inventory',
+          'on_hand_inventory_excl_reorder_level',
           'open_orders',
           'total_forecast_demand',
           'scheduled_receipts',
@@ -322,6 +263,7 @@ export default {
           'suggested_orders',
           'suggested_orders_value',
           'suggested_orders_value_payable',
+          'projected_on_hand_inventory_excl_reorder_level',
           'projected_on_hand_inventory',
         ],
         orderBy: 'creation desc',
@@ -492,25 +434,6 @@ export default {
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.default_supplier : '',
         },
-        {
-          field: 'urgency_level',
-          headerName: 'Urgency',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: { textAlign: 'center' },
-          comparator: (valueA, valueB) => {
-            const valA = valueA === 0 ? 999 : valueA
-            const valB = valueB === 0 ? 999 : valueB
-            return valA - valB
-          },
-          cellRenderer: (params) => {
-            if (params.data.type !== 'HEADER') return ''
-            return params.value !== 0
-              ? `⚠️ <b>P${params.value}</b>`
-              : params.value
-          },
-        },
       ]
 
       const actionsColumn = {
@@ -585,9 +508,12 @@ export default {
             // Show blank instead of 0 for most measures
             if (
               params.value === 0 &&
-              !['on_hand_inventory', 'projected_on_hand_inventory'].includes(
-                measure_key,
-              )
+              ![
+                'on_hand_inventory',
+                'on_hand_inventory_excl_reorder_level',
+                'projected_on_hand_inventory',
+                'projected_on_hand_inventory_excl_reorder_level',
+              ].includes(measure_key)
             ) {
               return ''
             }
@@ -608,6 +534,10 @@ export default {
     quantityFields() {
       return [
         { value: 'on_hand_inventory', label: 'On Hand Inventory' },
+        {
+          value: 'on_hand_inventory_excl_reorder_level',
+          label: 'On Hand Inventory (excl Suggested Orders)',
+        },
         { value: 'open_orders', label: 'Open Sales/Work Orders' },
         { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
         { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
@@ -637,6 +567,10 @@ export default {
         {
           value: 'projected_on_hand_inventory',
           label: 'Projected On Hand Inventory',
+        },
+        {
+          value: 'projected_on_hand_inventory_excl_reorder_level',
+          label: 'Projected On Hand Inventory (excl Suggested Orders)',
         },
       ]
     },
@@ -686,11 +620,8 @@ export default {
             reorder_quantity: entry.reorder_quantity,
             lead_time: entry.lead_time,
             default_supplier: entry.default_supplier,
-            _urgency_levels: [],
           }
         }
-
-        items[entry.item_code]._urgency_levels.push(entry.urgency_level)
 
         if (!entry.target_date) return
 
@@ -699,6 +630,7 @@ export default {
 
         const fieldsToPivot = [
           'on_hand_inventory',
+          'on_hand_inventory_excl_reorder_level',
           'open_orders',
           'total_forecast_demand',
           'scheduled_receipts',
@@ -707,19 +639,12 @@ export default {
           'suggested_orders_value',
           'suggested_orders_value_payable',
           'projected_on_hand_inventory',
+          'projected_on_hand_inventory_excl_reorder_level',
         ]
 
         fieldsToPivot.forEach((field) => {
           items[entry.item_code][`${weekKey}_${field}`] = entry[field]
         })
-      })
-
-      // 2. Process Items
-      Object.values(items).forEach((item) => {
-        const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
-        item.urgency_level =
-          positiveUrgencies.length > 0 ? Math.min(...positiveUrgencies) : 0
-        delete item._urgency_levels
       })
 
       let processedItems = Object.values(items)
@@ -843,12 +768,7 @@ export default {
     },
     getRowStyle(params) {
       if (params.data.type === 'HEADER') {
-        if (params.data.urgency_level === 1) {
-          return { background: '#ffdddd' }
-        } else if (params.data.urgency_level === 2) {
-          return { background: '#eab26eff' }
-        }
-        return { fontWeight: 'bold', background: '#f9f9f9' }
+        return { background: '#f9f9f9' }
       }
       return null
     },
