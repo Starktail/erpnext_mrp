@@ -894,11 +894,15 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			[stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code]
 		)
 		mrp_entry_docs[0].on_hand_inventory_excl_reorder_level = mrp_entry_docs[0].on_hand_inventory
+		mrp_entry_docs[0].on_hand_inventory_no_action = mrp_entry_docs[0].on_hand_inventory
 		total_item_demand = 0
 
 		for index, entry in enumerate(mrp_entry_docs):
 			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
+				entry.on_hand_inventory_no_action = mrp_entry_docs[
+					index - 1
+				].projected_on_hand_inventory_no_action
 				entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
 				entry.on_hand_inventory_excl_reorder_level = mrp_entry_docs[
 					index - 1
@@ -952,8 +956,11 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 			# Determine if there is a shortage exlcuding safety stock
 			entry.suggested_receipts_excl_reorder_level = 0
+			non_neg_on_hand_inventory_excl_reorder_level = max(
+				entry.on_hand_inventory_excl_reorder_level or 0, 0
+			)
 			shortage_excl_reorder_level = (
-				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
+				non_neg_on_hand_inventory_excl_reorder_level - demand + (entry.scheduled_receipts or 0)
 			)
 			if shortage_excl_reorder_level < 0:
 				shortage_excl_reorder_level *= -1
@@ -967,6 +974,11 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				- demand
 				+ (entry.scheduled_receipts or 0)
 				+ (entry.suggested_receipts_excl_reorder_level or 0)
+			)
+
+			# Calculate the inventory level if no suggested receipts are taken into account
+			entry.projected_on_hand_inventory_no_action = (
+				(entry.on_hand_inventory_no_action or 0) - demand + (entry.scheduled_receipts or 0)
 			)
 
 		# Based on lead time, set the suggested order qty for the correct earlier entry
@@ -983,6 +995,40 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 					mrp_entry_docs[index - weeks_before].suggested_orders = (
 						mrp_entry_docs[index - weeks_before].suggested_orders or 0
 					) + entry.suggested_receipts
+
+		# Determine Days to Reorder
+		# Find the first period with suggested receipts
+		today = date.today()
+
+		# 1. Standard (with reorder level)
+		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
+		if first_shortage_entry:
+			# When do we need it?
+			needed_date = getdate(first_shortage_entry.target_date)
+			# When should we have ordered it?
+			lead_time = first_shortage_entry.lead_time or 0
+			order_date = add_days(needed_date, -lead_time)
+
+			# Days from today (negative means late)
+			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
+		else:
+			mrp_entry_docs[0].days_to_reorder = None
+
+		# 2. Excl Reorder Level
+		first_shortage_excl_entry = next(
+			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
+		)
+		if first_shortage_excl_entry:
+			# When do we need it?
+			needed_date = getdate(first_shortage_excl_entry.target_date)
+			# When should we have ordered it?
+			lead_time = first_shortage_excl_entry.lead_time or 0
+			order_date = add_days(needed_date, -lead_time)
+
+			# Days from today (negative means late)
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days
+		else:
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = None
 
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:

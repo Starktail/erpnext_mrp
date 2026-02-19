@@ -19,6 +19,8 @@
   "reorder_quantity",
   "lead_time",
   "section_break_xyvo",
+  "on_hand_inventory_no_action",
+  "column_break_jnvj",
   "on_hand_inventory",
   "column_break_lmds",
   "on_hand_inventory_excl_reorder_level",
@@ -44,9 +46,13 @@
   "suggested_orders_value",
   "suggested_orders_value_payable",
   "section_break_gruc",
+  "projected_on_hand_inventory_no_action",
+  "column_break_mryl",
   "projected_on_hand_inventory",
+  "days_to_reorder",
   "column_break_zpfl",
-  "projected_on_hand_inventory_excl_reorder_level"
+  "projected_on_hand_inventory_excl_reorder_level",
+  "days_to_reorder_excl_reorder_level"
  ],
  "fields": [
   {
@@ -101,7 +107,7 @@
    "description": "Stock on Hand (Begin of period)",
    "fieldname": "on_hand_inventory",
    "fieldtype": "Float",
-   "label": "On Hand Inventory"
+   "label": "On Hand Inventory (Incl Safety Stock"
   },
   {
    "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period\n<br><br>\n<code>Reserved Qty + Reserved Qty for Production + Upstream Sales Order Demand</code>",
@@ -135,7 +141,7 @@
   {
    "fieldname": "projected_on_hand_inventory",
    "fieldtype": "Float",
-   "label": "Projected Stock on Hand"
+   "label": "Projected Stock on Hand (Incl Safety Stock)"
   },
   {
    "fieldname": "bom_level",
@@ -182,7 +188,8 @@
   },
   {
    "fieldname": "section_break_gruc",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Projected Stock on Hand (End of period)"
   },
   {
    "description": "Looks at <b>Work Orders</b>",
@@ -254,7 +261,8 @@
   },
   {
    "fieldname": "section_break_xyvo",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Projected Stock on Hand (Begin of period)"
   },
   {
    "fieldname": "column_break_lmds",
@@ -264,7 +272,7 @@
    "description": "Stock on Hand (Begin of period)",
    "fieldname": "on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
-   "label": "On Hand Inventory (Excl Reorder Level)"
+   "label": "On Hand Inventory (Excl Safety Stock"
   },
   {
    "fieldname": "column_break_zpfl",
@@ -273,18 +281,47 @@
   {
    "fieldname": "projected_on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
-   "label": "Projected Stock on Hand (Excl Reorder Level)"
+   "label": "Projected Stock on Hand (Excl Safety Stock)"
   },
   {
    "fieldname": "bom_list",
    "fieldtype": "Small Text",
    "label": "BOM List"
+  },
+  {
+   "fieldname": "days_to_reorder",
+   "fieldtype": "Int",
+   "label": "Days to Reorder (Incl Safety Stock)"
+  },
+  {
+   "fieldname": "days_to_reorder_excl_reorder_level",
+   "fieldtype": "Int",
+   "label": "Days to Reorder (Excl Safety Stock)"
+  },
+  {
+   "description": "Stock on Hand (Begin of period)",
+   "fieldname": "on_hand_inventory_no_action",
+   "fieldtype": "Float",
+   "label": "On Hand Inventory (Ignore Suggested Orders)"
+  },
+  {
+   "fieldname": "column_break_jnvj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "projected_on_hand_inventory_no_action",
+   "fieldtype": "Float",
+   "label": "Projected Stock on Hand (Ignore Suggested Orders)"
+  },
+  {
+   "fieldname": "column_break_mryl",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-18 05:30:47.184157",
+ "modified": "2026-02-19 15:09:28.349512",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

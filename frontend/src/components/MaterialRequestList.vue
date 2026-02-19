@@ -22,6 +22,14 @@
           <div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
           <span class="text-gray-600">Suggested Order</span>
         </div>
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #fed7d7"></div>
+          <span class="text-gray-600">Shortage</span>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #fff2cc"></div>
+          <span class="text-gray-600">Below Safety Stock</span>
+        </div>
         <Button
           @click="openCreateRequestDialog"
           :disabled="selectedRows.length === 0"
@@ -253,7 +261,10 @@ export default {
           'reorder_quantity',
           'lead_time',
           'default_supplier',
+          'days_to_reorder',
+          'days_to_reorder_excl_reorder_level',
           'target_date',
+          'on_hand_inventory_no_action',
           'on_hand_inventory',
           'on_hand_inventory_excl_reorder_level',
           'open_orders',
@@ -263,6 +274,7 @@ export default {
           'suggested_orders',
           'suggested_orders_value',
           'suggested_orders_value_payable',
+          'projected_on_hand_inventory_no_action',
           'projected_on_hand_inventory_excl_reorder_level',
           'projected_on_hand_inventory',
         ],
@@ -332,7 +344,7 @@ export default {
           headerName: 'Item Code / Measure',
           sortable: true,
           filter: true,
-          width: 200,
+          width: 300,
           pinned: 'left',
           cellRenderer: 'ExpandCellRenderer',
           cellRendererParams: {
@@ -402,6 +414,7 @@ export default {
           headerClass: 'ag-right-aligned-header',
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.reorder_level : '',
+          valueFormatter: (params) => this.formatQuantity(params.value),
         },
         {
           field: 'reorder_quantity',
@@ -413,6 +426,7 @@ export default {
           headerClass: 'ag-right-aligned-header',
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.reorder_quantity : '',
+          valueFormatter: (params) => this.formatQuantity(params.value),
         },
         {
           field: 'lead_time',
@@ -424,6 +438,7 @@ export default {
           headerClass: 'ag-right-aligned-header',
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.lead_time : '',
+          valueFormatter: (params) => this.formatQuantity(params.value),
         },
         {
           field: 'default_supplier',
@@ -433,6 +448,28 @@ export default {
           width: 120,
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.default_supplier : '',
+        },
+        {
+          field: 'days_to_reorder',
+          headerName: 'Days to Reorder (incl Safety)',
+          sortable: true,
+          filter: true,
+          width: 120,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER' ? params.data.days_to_reorder : '',
+          valueFormatter: (params) => this.formatQuantity(params.value),
+        },
+        {
+          field: 'days_to_reorder_excl_reorder_level',
+          headerName: 'Days to Reorder',
+          sortable: true,
+          filter: true,
+          width: 120,
+          valueGetter: (params) =>
+            params.data.type === 'HEADER'
+              ? params.data.days_to_reorder_excl_reorder_level
+              : '',
+          valueFormatter: (params) => this.formatQuantity(params.value),
         },
       ]
 
@@ -471,7 +508,7 @@ export default {
           headerName: this.getFormattedWeekHeader(weekKey),
           sortable: false,
           filter: false,
-          width: 40,
+          width: 60,
           headerClass: 'rotated-header',
           valueGetter: (params) => {
             if (params.data.type === 'HEADER') {
@@ -509,8 +546,10 @@ export default {
             if (
               params.value === 0 &&
               ![
+                'on_hand_inventory_no_action',
                 'on_hand_inventory',
                 'on_hand_inventory_excl_reorder_level',
+                'projected_on_hand_inventory_no_action',
                 'projected_on_hand_inventory',
                 'projected_on_hand_inventory_excl_reorder_level',
               ].includes(measure_key)
@@ -524,7 +563,7 @@ export default {
             if (qField && qField.valueFormatter) {
               return qField.valueFormatter(params)
             }
-            return params.value
+            return this.formatQuantity(params.value)
           },
         }
       })
@@ -533,15 +572,35 @@ export default {
     },
     quantityFields() {
       return [
-        { value: 'on_hand_inventory', label: 'On Hand Inventory' },
         {
-          value: 'on_hand_inventory_excl_reorder_level',
-          label: 'On Hand Inventory (excl Suggested Orders)',
+          value: 'projected_on_hand_inventory_no_action',
+          label: 'Projected On Hand [Ignore Suggested Orders]',
+          valueFormatter: (params) =>
+            params.value < 0 ? '<0' : this.formatQuantity(params.value),
+          cellStyle: (params) => {
+            if (params.value < 0) {
+              return { background: '#fed7d7', textAlign: 'right' }
+            }
+            if (params.value < params.data.reorder_level) {
+              return { background: '#fff2cc', textAlign: 'right' }
+            }
+            return { textAlign: 'right' }
+          },
+        },
+        { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
+        { value: 'suggested_receipts', label: 'Suggested Receipts' },
+        {
+          value: 'projected_on_hand_inventory_excl_reorder_level',
+          label:
+            'Projected On Hand [with Suggested Orders] (excl Safety Stock)',
+        },
+        {
+          value: 'projected_on_hand_inventory',
+          label:
+            'Projected On Hand [with Suggested Orders] (incl Safety Stock)',
         },
         { value: 'open_orders', label: 'Open Sales/Work Orders' },
         { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
-        { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
-        { value: 'suggested_receipts', label: 'Suggested Receipts' },
         {
           value: 'suggested_orders',
           label: 'Suggested Orders',
@@ -565,12 +624,16 @@ export default {
             params.value > 0 ? this.formatCurrency(params.value) : '',
         },
         {
-          value: 'projected_on_hand_inventory',
-          label: 'Projected On Hand Inventory',
+          value: 'on_hand_inventory_no_action',
+          label: 'On Hand [Ignore Suggested Orders]',
         },
         {
-          value: 'projected_on_hand_inventory_excl_reorder_level',
-          label: 'Projected On Hand Inventory (excl Suggested Orders)',
+          value: 'on_hand_inventory_excl_reorder_level',
+          label: 'On Hand [with Suggested Orders] (excl Safety Stock)',
+        },
+        {
+          value: 'on_hand_inventory',
+          label: 'On Hand [with Suggested Orders] (incl Safety Stock)',
         },
       ]
     },
@@ -620,6 +683,9 @@ export default {
             reorder_quantity: entry.reorder_quantity,
             lead_time: entry.lead_time,
             default_supplier: entry.default_supplier,
+            days_to_reorder: entry.days_to_reorder,
+            days_to_reorder_excl_reorder_level:
+              entry.days_to_reorder_excl_reorder_level,
           }
         }
 
@@ -629,6 +695,7 @@ export default {
         const weekKey = `${year}-W${String(week).padStart(2, '0')}`
 
         const fieldsToPivot = [
+          'on_hand_inventory_no_action',
           'on_hand_inventory',
           'on_hand_inventory_excl_reorder_level',
           'open_orders',
@@ -638,6 +705,7 @@ export default {
           'suggested_orders',
           'suggested_orders_value',
           'suggested_orders_value_payable',
+          'projected_on_hand_inventory_no_action',
           'projected_on_hand_inventory',
           'projected_on_hand_inventory_excl_reorder_level',
         ]
@@ -688,6 +756,7 @@ export default {
           row_id: `${item.item_code}_${qField.value}`,
           item_code_display: qField.label,
           default_supplier: item.default_supplier,
+          reorder_level: item.reorder_level,
         }
 
         Object.keys(item).forEach((key) => {
@@ -736,10 +805,27 @@ export default {
     isExpanded(itemCode) {
       return this.expandedItems.includes(itemCode)
     },
+    formatQuantity(value) {
+      if (value === null || value === undefined || value === '') return ''
+      if (typeof value !== 'number') return value
+      const absVal = Math.abs(value)
+      if (absVal >= 1000) {
+        const kVal = value / 1000
+        return (kVal % 1 === 0 ? kVal.toString() : kVal.toFixed(1)) + 'k'
+      }
+      return value
+    },
     formatCurrency(value) {
-      if (value === null || value === undefined) return ''
+      if (value === null || value === undefined || value === '') return ''
+      if (Math.abs(value) >= 1000) {
+        const kVal = value / 1000
+        const formattedK = kVal % 1 === 0 ? kVal.toString() : kVal.toFixed(1)
+        const currency = window.sysdefaults?.currency || 'USD'
+        const sample = formatCurrency(1, null, currency, 0)
+        return sample.replace('1', `${formattedK}k`).replace(/\s/g, '')
+      }
       const currency = window.sysdefaults?.currency
-      return formatCurrency(value, null, currency)
+      return formatCurrency(value, null, currency, 0)
     },
     exportToCsv() {
       this.gridApi.exportDataAsCsv({ allColumns: true })
@@ -926,6 +1012,10 @@ export default {
 
 .ag-theme-alpine {
   z-index: 0;
+  --ag-grid-size: 4px;
+  --ag-list-item-height: 24px;
+  --ag-row-height: 32px;
+  --ag-header-height: 40px;
 }
 
 .ag-header-row {
@@ -933,7 +1023,7 @@ export default {
 }
 
 .ag-theme-alpine .ag-header-cell.rotated-header .ag-header-cell-label {
-  height: 100%;
+  height: 150%;
   padding: 0 !important;
   display: flex;
   justify-content: center;
