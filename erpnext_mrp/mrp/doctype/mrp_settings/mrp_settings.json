@@ -16,7 +16,9 @@
   "po_item_delivery_date_field",
   "reorder_qty_item_field",
   "column_break_bdmb",
-  "html_rsvb"
+  "html_rsvb",
+  "display_settings_section",
+  "default_time_unit"
  ],
  "fields": [
   {
@@ -94,13 +96,25 @@
    "fieldname": "reorder_qty_item_field",
    "fieldtype": "Select",
    "label": "Custom Re-order Qty Item Field"
+  },
+  {
+   "fieldname": "display_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Display Settings"
+  },
+  {
+   "description": "Time Unit for 'Lead Time', and 'Time to Reorder' values",
+   "fieldname": "default_time_unit",
+   "fieldtype": "Select",
+   "label": "Default time unit",
+   "options": "Weeks\nDays"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-04 14:09:29.063632",
+ "modified": "2026-02-19 15:54:26.184347",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

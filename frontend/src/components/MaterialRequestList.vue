@@ -290,6 +290,14 @@ export default {
         },
       }
     },
+    mrp_settings() {
+      return {
+        type: 'document',
+        doctype: 'MRP Settings',
+        name: 'MRP Settings',
+        auto: true,
+      }
+    },
     material_request_creator() {
       return {
         url: 'frappe.client.insert',
@@ -313,6 +321,9 @@ export default {
     },
   },
   computed: {
+    defaultTimeUnit() {
+      return this.$resources.mrp_settings?.doc?.default_time_unit || 'Days'
+    },
     lastMrpRunTime() {
       if (this.$resources.last_mrp_run.loading) {
         return 'Loading...'
@@ -408,7 +419,7 @@ export default {
           field: 'reorder_level',
           headerName: 'Safety Stock',
           sortable: true,
-          filter: true,
+          filter: 'agNumberColumnFilter',
           width: 110,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
@@ -420,7 +431,7 @@ export default {
           field: 'reorder_quantity',
           headerName: 'Re-order Qty',
           sortable: true,
-          filter: true,
+          filter: 'agNumberColumnFilter',
           width: 110,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
@@ -430,15 +441,15 @@ export default {
         },
         {
           field: 'lead_time',
-          headerName: 'Lead Time',
+          headerName: `Lead Time (${this.defaultTimeUnit})`,
           sortable: true,
-          filter: true,
+          filter: 'agNumberColumnFilter',
           width: 100,
           cellStyle: { textAlign: 'right' },
           headerClass: 'ag-right-aligned-header',
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.lead_time : '',
-          valueFormatter: (params) => this.formatQuantity(params.value),
+          valueFormatter: (params) => this.formatTime(params.value),
         },
         {
           field: 'default_supplier',
@@ -451,25 +462,25 @@ export default {
         },
         {
           field: 'days_to_reorder',
-          headerName: 'Days to Reorder (incl Safety)',
+          headerName: `${this.defaultTimeUnit} to Reorder (incl Safety)`,
           sortable: true,
-          filter: true,
+          filter: 'agNumberColumnFilter',
           width: 120,
           valueGetter: (params) =>
             params.data.type === 'HEADER' ? params.data.days_to_reorder : '',
-          valueFormatter: (params) => this.formatQuantity(params.value),
+          valueFormatter: (params) => this.formatTime(params.value),
         },
         {
           field: 'days_to_reorder_excl_reorder_level',
-          headerName: 'Days to Reorder',
+          headerName: `${this.defaultTimeUnit} to Reorder`,
           sortable: true,
-          filter: true,
+          filter: 'agNumberColumnFilter',
           width: 120,
           valueGetter: (params) =>
             params.data.type === 'HEADER'
               ? params.data.days_to_reorder_excl_reorder_level
               : '',
-          valueFormatter: (params) => this.formatQuantity(params.value),
+          valueFormatter: (params) => this.formatTime(params.value),
         },
       ]
 
@@ -804,6 +815,16 @@ export default {
     },
     isExpanded(itemCode) {
       return this.expandedItems.includes(itemCode)
+    },
+    formatTime(value) {
+      if (value === null || value === undefined || value === '') return ''
+      let val = value
+      if (this.defaultTimeUnit === 'Weeks') {
+        val = val / 7
+        // Round to 1 decimal place for cleaner display
+        val = Math.round(val * 10) / 10
+      }
+      return this.formatQuantity(val)
     },
     formatQuantity(value) {
       if (value === null || value === undefined || value === '') return ''
