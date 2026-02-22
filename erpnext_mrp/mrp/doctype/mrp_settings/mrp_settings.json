@@ -9,6 +9,7 @@
   "periods_type",
   "look_ahead",
   "requirement_based_on",
+  "assume_remaining_qty",
   "advanced_settings_section",
   "item_condition",
   "item_lead_time_field",
@@ -16,7 +17,10 @@
   "po_item_delivery_date_field",
   "reorder_qty_item_field",
   "column_break_bdmb",
-  "html_rsvb"
+  "html_rsvb",
+  "display_settings_section",
+  "default_time_unit",
+  "render_supplier_name"
  ],
  "fields": [
   {
@@ -94,13 +98,38 @@
    "fieldname": "reorder_qty_item_field",
    "fieldtype": "Select",
    "label": "Custom Re-order Qty Item Field"
+  },
+  {
+   "fieldname": "display_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Display Settings"
+  },
+  {
+   "description": "Time Unit for 'Lead Time', and 'Time to Reorder' values",
+   "fieldname": "default_time_unit",
+   "fieldtype": "Select",
+   "label": "Default time unit",
+   "options": "Weeks\nDays"
+  },
+  {
+   "default": "1",
+   "fieldname": "render_supplier_name",
+   "fieldtype": "Check",
+   "label": "Render Supplier Name instead of Supplier ID"
+  },
+  {
+   "default": "1",
+   "description": "When enabled, MRP assumes the remaining quantity of a partially received purchase order will arrive on its expected arrival date.<br>When disabled, MRP ignores the remaining quantity when calculating scheduled receipts",
+   "fieldname": "assume_remaining_qty",
+   "fieldtype": "Check",
+   "label": "Assume Remaining Quantity for Partially Received POs"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-04 14:09:29.063632",
+ "modified": "2026-02-22 14:24:09.717810",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

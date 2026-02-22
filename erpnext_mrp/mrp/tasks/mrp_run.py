@@ -14,6 +14,10 @@ from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
 
 
 @frappe.whitelist()
+def trigger_mrp_run():
+	frappe.get_doc("Scheduled Job Type", "mrp_run.mrp_run").enqueue(force=True)
+
+
 def mrp_run(enqueue: bool = True):
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
@@ -106,7 +110,8 @@ def create_mrp_item_entries():
 				WHERE b.item = t_item.name
 				AND b.is_active = 1
 				AND b.is_default = 1
-			)) AS is_manufactured
+			)) AS is_manufactured,
+			0 AS is_header
 		FROM `tabItem` AS t_item
 		LEFT JOIN bom_rollup br ON t_item.name = br.item_code
 		WHERE t_item.disabled = 0
@@ -146,12 +151,23 @@ def create_mrp_item_entries():
 	period_data = list(periods.items())
 
 	# 4. Efficiently combine items and periods and prepare for bulk insert
-	# item is a tuple: (item_code, bom_level, root_bom, is_manufactured)
+	# item is a tuple: (item_code, lead_time, bom_level, root_bom, is_manufactured, is_header)
 	# period is a tuple: (period_str, target_date)
 	owner = frappe.session.user
 	creation = datetime.datetime.now()
 	final_values = [
-		(f"{item[0]}{period[0]}", item[0], item[1], item[2], item[3], item[4], period[1], owner, creation)
+		(
+			f"{item[0]}{period[0]}",
+			item[0],
+			item[1],
+			item[2],
+			item[3],
+			item[4],
+			1 if period[0] == period_data[0][0] else 0,
+			period[1],
+			owner,
+			creation,
+		)
 		for item, period in itertools.product(item_list, period_data)
 	]
 
@@ -170,6 +186,7 @@ def create_mrp_item_entries():
 			"bom_level",
 			"bom_list",
 			"is_manufactured",
+			"is_header",
 			"target_date",
 			"owner",
 			"creation",
@@ -698,6 +715,10 @@ def _update_ordered_qty():
 
 	receiving_date_expression = f"po_item.`{receiving_date_field}`"
 
+	partial_receipt_condition = ""
+	if not settings.assume_remaining_qty:
+		partial_receipt_condition = "AND (po_item.received_qty = 0 OR po_item.received_qty IS NULL)"
+
 	sql_query = f"""# nosemgrep: frappe-sql-format-injection
         SELECT
             po_item.item_code,
@@ -714,6 +735,7 @@ def _update_ordered_qty():
             AND po.docstatus = 1
             AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
             AND {receiving_date_expression} <= %(end_date)s
+            {partial_receipt_condition}
         GROUP BY
             po_item.item_code,
             calendar_week;
@@ -813,7 +835,7 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	item_details_list = frappe.db.sql(item_details_query, as_dict=True)
 
 	# Process items in batches
-	batch_size = 1000
+	batch_size = 500
 	for i in range(0, len(item_details_list), batch_size):
 		batch = item_details_list[i : i + batch_size]
 		if enqueue:
@@ -894,11 +916,15 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			[stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code]
 		)
 		mrp_entry_docs[0].on_hand_inventory_excl_reorder_level = mrp_entry_docs[0].on_hand_inventory
+		mrp_entry_docs[0].on_hand_inventory_no_action = mrp_entry_docs[0].on_hand_inventory
 		total_item_demand = 0
 
 		for index, entry in enumerate(mrp_entry_docs):
 			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
+				entry.on_hand_inventory_no_action = mrp_entry_docs[
+					index - 1
+				].projected_on_hand_inventory_no_action
 				entry.on_hand_inventory = mrp_entry_docs[index - 1].projected_on_hand_inventory
 				entry.on_hand_inventory_excl_reorder_level = mrp_entry_docs[
 					index - 1
@@ -969,6 +995,11 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				+ (entry.suggested_receipts_excl_reorder_level or 0)
 			)
 
+			# Calculate the inventory level if no suggested receipts are taken into account
+			entry.projected_on_hand_inventory_no_action = (
+				(entry.on_hand_inventory_no_action or 0) - demand + (entry.scheduled_receipts or 0)
+			)
+
 		# Based on lead time, set the suggested order qty for the correct earlier entry
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
 			if entry.suggested_receipts:
@@ -984,33 +1015,39 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 						mrp_entry_docs[index - weeks_before].suggested_orders or 0
 					) + entry.suggested_receipts
 
-		# Determine Level of Urgency
-		# Level 1: Required in first week and not enough On Order (excl safety stock)
-		# Current SoH + Total scheduled_receipts < total demand and no suggested orders for period 0
-		total_scheduled_receipts = sum([entry.scheduled_receipts for entry in mrp_entry_docs])
-		if (mrp_entry_docs[0].on_hand_inventory + total_scheduled_receipts < total_item_demand) and (
-			mrp_entry_docs[0].suggested_orders > 0
-		):
-			mrp_entry_docs[0].urgency_level = 1
+		# Determine Days to Reorder
+		# Find the first period with suggested receipts
+		today = date.today()
 
-		# Level 2. Enough On Order, but late (excl safety stock)
-		# Current SoH + Total scheduled_receipts <= total demand (but no suggested orders for period 0)
-		# OR
-		# Somewhere we will run out of stock (aka any suggested_receipts_excl_reorder_level > 0)
-		elif (mrp_entry_docs[0].on_hand_inventory + total_scheduled_receipts < total_item_demand) or sum(
-			[entry.suggested_receipts_excl_reorder_level for entry in mrp_entry_docs]
-		) > 0:
-			mrp_entry_docs[0].urgency_level = 2
+		# 1. Standard (with reorder level)
+		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
+		if first_shortage_entry:
+			# When do we need it?
+			needed_date = getdate(first_shortage_entry.target_date)
+			# When should we have ordered it?
+			lead_time = first_shortage_entry.lead_time or 0
+			order_date = add_days(needed_date, -lead_time)
 
-		# Level 3. On order, but the stock level will drop below the safety stock level
-		# Current SoH + Total scheduled_receipts >= total demand
-		# AND
-		# Somewhere we will land below the safety stock level (aka suggested_receipts > 0)
-		elif sum([entry.suggested_receipts for entry in mrp_entry_docs]) > 0:
-			mrp_entry_docs[0].urgency_level = 3
-
+			# Days from today (negative means late)
+			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
 		else:
-			mrp_entry_docs[0].urgency_level = 0
+			mrp_entry_docs[0].days_to_reorder = None
+
+		# 2. Excl Reorder Level
+		first_shortage_excl_entry = next(
+			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
+		)
+		if first_shortage_excl_entry:
+			# When do we need it?
+			needed_date = getdate(first_shortage_excl_entry.target_date)
+			# When should we have ordered it?
+			lead_time = first_shortage_excl_entry.lead_time or 0
+			order_date = add_days(needed_date, -lead_time)
+
+			# Days from today (negative means late)
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days
+		else:
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = None
 
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:

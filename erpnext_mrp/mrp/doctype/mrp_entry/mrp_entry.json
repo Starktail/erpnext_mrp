@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "item_code",
+  "is_header",
   "bom_level",
   "bom_list",
   "target_date",
@@ -14,13 +15,14 @@
   "item_name",
   "item_group",
   "default_supplier",
+  "default_supplier_name",
   "uom",
   "reorder_level",
   "reorder_quantity",
   "lead_time",
-  "is_urgent",
-  "urgency_level",
   "section_break_xyvo",
+  "on_hand_inventory_no_action",
+  "column_break_jnvj",
   "on_hand_inventory",
   "column_break_lmds",
   "on_hand_inventory_excl_reorder_level",
@@ -46,9 +48,13 @@
   "suggested_orders_value",
   "suggested_orders_value_payable",
   "section_break_gruc",
+  "projected_on_hand_inventory_no_action",
+  "column_break_mryl",
   "projected_on_hand_inventory",
+  "days_to_reorder",
   "column_break_zpfl",
-  "projected_on_hand_inventory_excl_reorder_level"
+  "projected_on_hand_inventory_excl_reorder_level",
+  "days_to_reorder_excl_reorder_level"
  ],
  "fields": [
   {
@@ -100,16 +106,10 @@
    "label": "Lead Time"
   },
   {
-   "default": "0",
-   "fieldname": "is_urgent",
-   "fieldtype": "Check",
-   "label": "Urgent"
-  },
-  {
    "description": "Stock on Hand (Begin of period)",
    "fieldname": "on_hand_inventory",
    "fieldtype": "Float",
-   "label": "On Hand Inventory"
+   "label": "On Hand Inventory (Incl Safety Stock"
   },
   {
    "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period\n<br><br>\n<code>Reserved Qty + Reserved Qty for Production + Upstream Sales Order Demand</code>",
@@ -143,7 +143,7 @@
   {
    "fieldname": "projected_on_hand_inventory",
    "fieldtype": "Float",
-   "label": "Projected Stock on Hand"
+   "label": "Projected Stock on Hand (Incl Safety Stock)"
   },
   {
    "fieldname": "bom_level",
@@ -190,7 +190,8 @@
   },
   {
    "fieldname": "section_break_gruc",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Projected Stock on Hand (End of period)"
   },
   {
    "description": "Looks at <b>Work Orders</b>",
@@ -235,12 +236,6 @@
    "label": "Is Manufactured"
   },
   {
-   "description": "0. Not Urgent<br>\n1. Required and not On Order<br>\n2. On Order, but late<br>\n3. Ordered but stock level will be lower than safety stock",
-   "fieldname": "urgency_level",
-   "fieldtype": "Int",
-   "label": "Urgency Level"
-  },
-  {
    "description": "Used to determine Urgency Level",
    "fieldname": "suggested_receipts_excl_reorder_level",
    "fieldtype": "Float",
@@ -268,7 +263,8 @@
   },
   {
    "fieldname": "section_break_xyvo",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Projected Stock on Hand (Begin of period)"
   },
   {
    "fieldname": "column_break_lmds",
@@ -278,7 +274,7 @@
    "description": "Stock on Hand (Begin of period)",
    "fieldname": "on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
-   "label": "On Hand Inventory (Excl Reorder Level)"
+   "label": "On Hand Inventory (Excl Safety Stock"
   },
   {
    "fieldname": "column_break_zpfl",
@@ -287,18 +283,60 @@
   {
    "fieldname": "projected_on_hand_inventory_excl_reorder_level",
    "fieldtype": "Float",
-   "label": "Projected Stock on Hand (Excl Reorder Level)"
+   "label": "Projected Stock on Hand (Excl Safety Stock)"
   },
   {
    "fieldname": "bom_list",
    "fieldtype": "Small Text",
    "label": "BOM List"
+  },
+  {
+   "fieldname": "days_to_reorder",
+   "fieldtype": "Int",
+   "label": "Days to Reorder (Incl Safety Stock)"
+  },
+  {
+   "fieldname": "days_to_reorder_excl_reorder_level",
+   "fieldtype": "Int",
+   "label": "Days to Reorder (Excl Safety Stock)"
+  },
+  {
+   "description": "Stock on Hand (Begin of period)",
+   "fieldname": "on_hand_inventory_no_action",
+   "fieldtype": "Float",
+   "label": "On Hand Inventory (Ignore Suggested Orders)"
+  },
+  {
+   "fieldname": "column_break_jnvj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "projected_on_hand_inventory_no_action",
+   "fieldtype": "Float",
+   "label": "Projected Stock on Hand (Ignore Suggested Orders)"
+  },
+  {
+   "fieldname": "column_break_mryl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_header",
+   "fieldtype": "Check",
+   "label": "Is Period 0"
+  },
+  {
+   "fetch_from": "default_supplier.supplier_name",
+   "fieldname": "default_supplier_name",
+   "fieldtype": "Link",
+   "label": "Default Supplier Name",
+   "options": "Supplier"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-01 16:19:04.928290",
+ "modified": "2026-02-22 13:38:51.772685",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

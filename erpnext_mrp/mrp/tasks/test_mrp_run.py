@@ -513,7 +513,6 @@ class TestMRPRun(FrappeTestCase):
 				"suggested_receipts",
 				"suggested_orders",
 				"projected_on_hand_inventory",
-				"urgency_level",
 			],
 			filters={"item_code": "SRZLONG123"},
 			order_by="name asc",
@@ -570,7 +569,9 @@ class TestMRPRun(FrappeTestCase):
 		# We have a Suggested Receipts in periods 14 and 8.
 		# As the lead time of 112 days is longer than this, we expect an URGENT (p1) Suggested Order for this in period 0
 		self.assertEqual(mrp_entries[0].suggested_orders, 200)
-		self.assertEqual(mrp_entries[0].urgency_level, 1, "Expected an urgency_level of 1")
+
+		# TODO: change assert to stock level check
+		# self.assertEqual(mrp_entries[0].urgency_level, 1, "Expected an urgency_level of 1")
 
 		# Now, add an actual receipt in period 14
 		# In total we'll have enough to meet demand, but the receipts are late, hence a p2 scenario
@@ -579,11 +580,12 @@ class TestMRPRun(FrappeTestCase):
 		)
 		create_mrp_item_entries()
 		process_mrp_item_entries(enqueue=False)
-		mrp_entries = frappe.get_all(
-			"MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc"
-		)
+		# mrp_entries = frappe.get_all(
+		# 	"MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc"
+		# )
 
-		self.assertEqual(mrp_entries[0].urgency_level, 2, "Expected an urgency_level of 2")
+		# # TODO: change assert to stock level check
+		# self.assertEqual(mrp_entries[0].urgency_level, 2, "Expected an urgency_level of 2")
 
 		# Now, add an another receipt in period 3
 		# This will avoid a shortage, but still bring the stock level to below the safety stock level, hence a p3 scenario
@@ -592,11 +594,12 @@ class TestMRPRun(FrappeTestCase):
 		)
 		create_mrp_item_entries()
 		process_mrp_item_entries(enqueue=False)
-		mrp_entries = frappe.get_all(
-			"MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc"
-		)
+		# mrp_entries = frappe.get_all(
+		# 	"MRP Entry", fields=["urgency_level"], filters={"item_code": "SRZLONG123"}, order_by="name asc"
+		# )
 
-		self.assertEqual(mrp_entries[0].urgency_level, 3, "Expected an urgency_level of 3")
+		# TODO: change assert to stock level check
+		# self.assertEqual(mrp_entries[0].urgency_level, 3, "Expected an urgency_level of 3")
 
 		# Now, add an another receipt in period 2
 		# This ensure the projected stock level is always above the safety stock level, hence a p0 scenario
@@ -613,13 +616,14 @@ class TestMRPRun(FrappeTestCase):
 				"suggested_receipts",
 				"suggested_orders",
 				"projected_on_hand_inventory",
-				"urgency_level",
+				# "urgency_level",
 			],
 			filters={"item_code": "SRZLONG123"},
 			order_by="name asc",
 		)
 
-		self.assertEqual(mrp_entries[0].urgency_level, 0, "Expected an urgency_level of 0")
+		# TODO: change assert to stock level check
+		# self.assertEqual(mrp_entries[0].urgency_level, 0, "Expected an urgency_level of 0")
 
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable(self, mock_date):
 		"""
@@ -1055,6 +1059,62 @@ class TestMRPRun(FrappeTestCase):
 		# Expect a Suggested Orders Value Payable
 		# With no default supplier, payable date should default to the order date
 		self.assertEqual(mrp_entry.suggested_orders_value_payable, 20)
+
+	def test_days_to_reorder_calculation(self, mock_date):
+		"""
+		Test that days_to_reorder is calculated correctly.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		# 1. Test Future Order (Positive days_to_reorder)
+		# Create Item with 10 days lead time
+		create_item("TEST-DTR-01", "Test DTR Item 1", "Raw Material", lead_time_days=10)
+
+		# Create demand due in 20 days (CW 48).
+		# T (Nov 4) is Week 45.
+		# T+20 (Nov 24) is Week 48.
+		# Bucket for Week 48 has target_date = Nov 4 + 21 days = Nov 25.
+		# Receipt Date = Nov 25.
+		# Order Date = Nov 25 - 10 days = Nov 15.
+		# Days to reorder = Nov 15 - Nov 4 = 11 days.
+		due_date_future = add_days(test_start_day, 20)
+		create_sales_order("TEST-DTR-01", 10, due_date_future, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		mrp_entries = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-01"},
+			fields=["days_to_reorder", "target_date"],
+			order_by="target_date asc",
+		)
+		self.assertEqual(mrp_entries[0].days_to_reorder, 11)
+
+		# 2. Test Late Order (Negative days_to_reorder)
+		# Create Item with 10 days lead time
+		create_item("TEST-DTR-02", "Test DTR Item 2", "Raw Material", lead_time_days=10)
+
+		# Create demand due in 5 days (CW 45).
+		# T+5 (Nov 9) is Week 45.
+		# Bucket for Week 45 has target_date = Nov 4.
+		# Receipt Date = Nov 4.
+		# Order Date = Nov 4 - 10 = Oct 25.
+		# Days to reorder = Oct 25 - Nov 4 = -10.
+		due_date_late = add_days(test_start_day, 5)
+		create_sales_order("TEST-DTR-02", 10, due_date_late, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		mrp_entries_2 = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-02"},
+			fields=["days_to_reorder", "target_date"],
+			order_by="target_date asc",
+		)
+		self.assertEqual(mrp_entries_2[0].days_to_reorder, -10)
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):

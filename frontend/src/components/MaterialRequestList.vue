@@ -1,6 +1,6 @@
 <template>
   <div class="h-full flex flex-col">
-    <div class="mb-4 flex justify-between items-center">
+    <div class="mb-4 flex justify-between items-center shrink-0">
       <div class="flex gap-2 items-center">
         <Button @click="clearFilters">Clear Filters</Button>
         <Button @click="rerunMrp">Rerun MRP Calculations</Button>
@@ -18,49 +18,58 @@
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
         <div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
-        <div
-          class="flex items-center gap-2 text-sm cursor-pointer"
-          @click="showUrgencyLegend = true"
-        >
-          <div class="w-4 h-4 rounded" style="background-color: #ffdddd"></div>
-          <div
-            class="w-4 h-4 rounded"
-            style="background-color: #eab26eff"
-          ></div>
-          <span class="text-gray-600 hover:underline">Urgency Legend</span>
-        </div>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
           <span class="text-gray-600">Suggested Order</span>
         </div>
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #fed7d7"></div>
+          <span class="text-gray-600">Shortage</span>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <div class="w-4 h-4 rounded" style="background-color: #fff2cc"></div>
+          <span class="text-gray-600">Below Safety Stock</span>
+        </div>
         <Button
           @click="openCreateRequestDialog"
-          :disabled="selectedRows.length === 0"
+          :disabled="selectedRowKeys.length === 0"
           >Create Material Request</Button
         >
       </div>
     </div>
-    <ag-grid-vue
-      class="ag-theme-alpine w-full flex-grow"
-      theme="legacy"
-      :columnDefs="dynamicColumnDefs"
-      :rowData="mrpEntryRows"
-      :pagination="true"
-      :paginationPageSize="100"
-      :getRowId="getRowId"
-      :defaultColDef="{
-        wrapHeaderText: true,
-        autoHeaderHeight: true,
-        resizable: true,
-      }"
-      :getRowStyle="getRowStyle"
-      :tooltipShowDelay="300"
-      :tooltipHideDelay="2000"
-      :enableBrowserTooltips="false"
-      @grid-ready="onGridReady"
-      rowSelection="multiple"
-      @selection-changed="onSelectionChanged"
-    />
+
+    <div class="w-full flex-grow">
+      <n-data-table
+        ref="tableRef"
+        remote
+        :columns="columns"
+        :data="treeData"
+        :row-key="rowKey"
+        :loading="loadingRef"
+        :bordered="true"
+        :single-line="false"
+        size="small"
+        :pagination="paginationReactive"
+        :checked-row-keys="selectedRowKeys"
+        :row-class-name="rowClassName"
+        :get-csv-cell="getCsvCell"
+        :get-csv-header="getCsvHeader"
+        @update:checked-row-keys="handleCheck"
+        @update:filters="handleFiltersChange"
+        @update:sorter="handleSorterChange"
+        @update:page="handlePageChange"
+        @update:page-size="handlePageSizeChange"
+        @load="onLoad"
+        :cascade="false"
+        allow-checking-not-loaded
+        :scroll-x="scrollX"
+        virtual-scroll
+        flex-height
+        striped
+        class="h-full"
+      />
+    </div>
+
     <Dialog v-model="showRerunDialog" @hide="showRerunDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">
@@ -163,128 +172,800 @@
         <Button @click="showSuccessDialog = false">Close</Button>
       </template>
     </Dialog>
-    <Dialog v-model="showUrgencyLegend" @hide="showUrgencyLegend = false">
-      <template #body-title>
-        <h3 class="text-2xl font-semibold text-ink-gray-9">
-          Urgency Level Legend
-        </h3>
-      </template>
-      <template #body-content>
-        <div>
-          <p>The urgency level highlights items that require attention:</p>
-          <ul class="list-disc list-inside my-4 space-y-2">
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #ffdddd"
-              ></div>
-              <span
-                ><b>P1 - Critical:</b> Required and not enough quantity on order
-                (excl safety stock).</span
-              >
-            </li>
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #eab26eff"
-              ></div>
-              <span
-                ><b>P2 - Attention:</b> Enough quantity on order, but scheduled
-                to arrive late (excl safety stock).</span
-              >
-            </li>
-            <li class="flex items-start gap-2">
-              <div
-                class="w-4 h-4 rounded mt-1 flex-shrink-0"
-                style="background-color: #888888ff"
-              ></div>
-              <span
-                ><b>P3 - Optional:</b> On order, but the stock level will drop
-                below the safety stock (no row highlight)</span
-              >
-            </li>
-          </ul>
-        </div>
-      </template>
-      <template #actions>
-        <Button @click="showUrgencyLegend = false">Close</Button>
-      </template>
-    </Dialog>
   </div>
 </template>
 
-<script>
-import { nextTick } from 'vue'
-import { AgGridVue } from 'ag-grid-vue3'
-// AG Grid CSS is now imported in main.js
-import { Button, Dialog, Combobox, Checkbox, call, toast } from 'frappe-ui'
-import { formatCurrency } from '../utils/numberFormat'
+<script setup>
+import { ref, reactive, computed, watch, nextTick, h, onMounted } from 'vue'
+import { NDataTable, NInput, NInputNumber, NSpace } from 'naive-ui'
+import {
+  Button,
+  Dialog,
+  Combobox,
+  Checkbox,
+  call,
+  toast,
+  createListResource,
+  createResource,
+  createDocumentResource,
+} from 'frappe-ui'
+import { formatCurrency as formatCurrencyUtil } from '../utils/numberFormat'
 
-export default {
-  name: 'MaterialRequestList',
-  components: {
-    AgGridVue,
-    Dialog, // Register the Dialog component
-    Combobox, // Register the Combobox component
-    Checkbox,
-    buttonCellRenderer: {
-      name: 'ButtonCellRenderer',
-      template: `<Button @click="onButtonClick">Planning Detail</Button>`,
-      components: {
-        // Explicitly register Button for this local component
-        Button,
-      },
-      props: {
-        params: {
-          // AG Grid passes params via a prop named 'params'
-          type: Object,
-          required: true,
+const showDialog = ref(false)
+const closed_column_field = ref('suggested_orders')
+const selectedRowKeys = ref([])
+const showCreateDialog = ref(false)
+const selectedItemsSummary = ref([])
+const showSuccessDialog = ref(false)
+const newlyCreatedDocs = ref([])
+const showRerunDialog = ref(false)
+const onlyShowSuggested = ref(false)
+
+const textFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
+})
+
+const appliedTextFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
+})
+
+const numberFilters = reactive({
+  reorder_level: { min: null, max: null },
+  reorder_quantity: { min: null, max: null },
+  lead_time: { min: null, max: null },
+  days_to_reorder: { min: null, max: null },
+  days_to_reorder_excl_reorder_level: { min: null, max: null },
+})
+
+const appliedNumberFilters = reactive({
+  reorder_level: { min: null, max: null },
+  reorder_quantity: { min: null, max: null },
+  lead_time: { min: null, max: null },
+  days_to_reorder: { min: null, max: null },
+  days_to_reorder_excl_reorder_level: { min: null, max: null },
+})
+
+function renderTextFilter(columnKey, placeholder) {
+  return ({ hide }) => {
+    return h('div', { style: { padding: '8px', width: '250px' } }, [
+      h(NInput, {
+        value: textFilters[columnKey],
+        'onUpdate:value': (v) => {
+          textFilters[columnKey] = v
         },
-      },
-      methods: {
-        onButtonClick() {
-          // Call the method passed in cellRendererParams from the parent component
-          this.params.onOpenDialog()
+        placeholder: placeholder,
+        size: 'small',
+        style: { marginBottom: '8px' },
+        onKeyup: (e) => {
+          if (e.key === 'Enter') {
+            appliedTextFilters[columnKey] = textFilters[columnKey]
+            paginationReactive.page = 1
+            executeAsyncQuery()
+            hide()
+          }
         },
-      },
+      }),
+      h(NSpace, { justify: 'end' }, () => [
+        h(
+          Button,
+          {
+            size: 'sm',
+            onClick: () => {
+              textFilters[columnKey] = ''
+              appliedTextFilters[columnKey] = ''
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Clear',
+        ),
+        h(
+          Button,
+          {
+            size: 'sm',
+            variant: 'solid',
+            onClick: () => {
+              appliedTextFilters[columnKey] = textFilters[columnKey]
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Search',
+        ),
+      ]),
+    ])
+  }
+}
+
+function renderNumberFilter(columnKey) {
+  return ({ hide }) => {
+    return h('div', { style: { padding: '8px', width: '250px' } }, [
+      h(NSpace, { vertical: true, style: { marginBottom: '8px' } }, () => [
+        h(NInputNumber, {
+          value: numberFilters[columnKey].min,
+          'onUpdate:value': (v) => {
+            numberFilters[columnKey].min = v
+          },
+          placeholder: 'Min',
+          size: 'small',
+          clearable: true,
+        }),
+        h(NInputNumber, {
+          value: numberFilters[columnKey].max,
+          'onUpdate:value': (v) => {
+            numberFilters[columnKey].max = v
+          },
+          placeholder: 'Max',
+          size: 'small',
+          clearable: true,
+        }),
+      ]),
+      h(NSpace, { justify: 'end' }, () => [
+        h(
+          Button,
+          {
+            size: 'sm',
+            onClick: () => {
+              numberFilters[columnKey].min = null
+              numberFilters[columnKey].max = null
+              appliedNumberFilters[columnKey].min = null
+              appliedNumberFilters[columnKey].max = null
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Clear',
+        ),
+        h(
+          Button,
+          {
+            size: 'sm',
+            variant: 'solid',
+            onClick: () => {
+              appliedNumberFilters[columnKey].min = numberFilters[columnKey].min
+              appliedNumberFilters[columnKey].max = numberFilters[columnKey].max
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Filter',
+        ),
+      ]),
+    ])
+  }
+}
+
+const sorterRef = ref(null)
+
+const paginationReactive = reactive({
+  page: 1,
+  pageSize: 10,
+  showSizePicker: true,
+  pageSizes: [5, 10, 20, 50],
+  itemCount: 0,
+})
+
+const treeData = ref([])
+const scrollX = ref(2500)
+const loadingRef = ref(true)
+
+onMounted(async () => {
+  executeAsyncQuery()
+})
+
+const mrp_settings = createDocumentResource({
+  doctype: 'MRP Settings',
+  name: 'MRP Settings',
+  auto: true,
+})
+
+const defaultTimeUnit = computed(
+  () => mrp_settings.doc?.default_time_unit || 'Days',
+)
+
+const last_mrp_run = createListResource({
+  doctype: 'Scheduled Job Log',
+  fields: ['creation'],
+  filters: {
+    scheduled_job_type: 'mrp_run.mrp_run',
+  },
+  orderBy: 'creation desc',
+  pageLength: 1,
+  auto: true,
+})
+
+const lastMrpRunTime = computed(() => {
+  if (last_mrp_run.list.loading) {
+    return 'Loading...'
+  }
+  if (!last_mrp_run.data || last_mrp_run.data.length === 0) {
+    return 'MRP has not run yet.'
+  }
+  const lastRun = last_mrp_run.data[0]
+  if (lastRun) {
+    const d = new Date(lastRun.creation)
+    return `Last MRP Run: ${d.toLocaleString()}`
+  }
+  return 'MRP has not run yet.'
+})
+
+const material_request_creator = createResource({
+  url: 'frappe.client.insert',
+})
+
+function formatQuantity(value) {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value !== 'number') return value
+  const absVal = Math.abs(value)
+  if (absVal >= 1000) {
+    const kVal = value / 1000
+    return (kVal % 1 === 0 ? kVal.toString() : kVal.toFixed(1)) + 'k'
+  }
+  return value
+}
+
+function formatTime(value) {
+  if (value === null || value === undefined || value === '') return ''
+  let val = value
+  if (defaultTimeUnit.value === 'Weeks') {
+    val = val / 7
+    val = Math.round(val * 10) / 10
+  }
+  return formatQuantity(val)
+}
+
+function formatCurrency(value) {
+  if (value === null || value === undefined || value === '') return ''
+  if (Math.abs(value) >= 1000) {
+    const kVal = value / 1000
+    const formattedK = kVal % 1 === 0 ? kVal.toString() : kVal.toFixed(1)
+    const currency = window.sysdefaults?.currency || 'USD'
+    const sample = formatCurrencyUtil(1, null, currency, 0)
+    return sample.replace('1', `${formattedK}k`).replace(/\s/g, '')
+  }
+  const currency = window.sysdefaults?.currency
+  return formatCurrencyUtil(value, null, currency, 0)
+}
+
+const quantityFields = computed(() => [
+  {
+    value: 'projected_on_hand_inventory_no_action',
+    label: 'Projected On Hand [Ignore Suggested Orders]',
+    formatter: (val) => (val < 0 ? '<0' : formatQuantity(val)),
+    cellClass: (val, data) => {
+      if (val < 0) return 'shortage'
+      if (val < data.reorder_level) return 'below-safety'
+      return ''
     },
   },
-  data() {
-    return {
-      gridApi: null,
-      columnApi: null,
-      showDialog: false,
-      closed_column_field: 'suggested_orders',
-      selectedRows: [],
-      showCreateDialog: false,
-      selectedItemsSummary: [],
-      showSuccessDialog: false,
-      newlyCreatedDocs: [],
-      showRerunDialog: false,
-      onlyShowSuggested: false,
-      showUrgencyLegend: false,
-    }
+  { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
+  { value: 'suggested_receipts', label: 'Suggested Receipts' },
+  {
+    value: 'projected_on_hand_inventory_excl_reorder_level',
+    label: 'Projected On Hand [with Suggested Orders] (excl Safety Stock)',
   },
-  resources: {
-    mrp_entries() {
-      return {
-        type: 'list',
+  {
+    value: 'projected_on_hand_inventory',
+    label: 'Projected On Hand [with Suggested Orders] (incl Safety Stock)',
+  },
+  { value: 'open_orders', label: 'Open Sales/Work Orders' },
+  { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
+  {
+    value: 'suggested_orders',
+    label: 'Suggested Orders',
+    cellClass: (val) => (val > 0 ? 'suggested-order' : ''),
+  },
+  {
+    value: 'suggested_orders_value',
+    label: 'Suggested Orders Value',
+    formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
+  },
+  {
+    value: 'suggested_orders_value_payable',
+    label: 'Suggested Orders Payable',
+    formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
+  },
+  {
+    value: 'on_hand_inventory_no_action',
+    label: 'On Hand [Ignore Suggested Orders]',
+  },
+  {
+    value: 'on_hand_inventory_excl_reorder_level',
+    label: 'On Hand [with Suggested Orders] (excl Safety Stock)',
+  },
+  {
+    value: 'on_hand_inventory',
+    label: 'On Hand [with Suggested Orders] (incl Safety Stock)',
+  },
+])
+
+function getWeekNumber(d) {
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  var weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
+  return [d.getUTCFullYear(), weekNo]
+}
+
+function getDateFromWeek(weekStr) {
+  if (!weekStr) return null
+  const [year, week] = weekStr.split('-W').map(Number)
+  const d = new Date(Date.UTC(year, 0, 4))
+  d.setUTCDate(d.getUTCDate() + (week - 1) * 7)
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() || 7) + 1)
+  return d.toISOString().split('T')[0]
+}
+
+function getFormattedWeekHeader(weekKey) {
+  const [year, weekNum] = weekKey.split('-W').map(Number)
+  const mondayDateStr = getDateFromWeek(weekKey)
+  if (!mondayDateStr) return weekKey
+  const [y, m, d] = mondayDateStr.split('-')
+  return `CW ${weekNum} | ${d}-${m}-${y.slice(-2)}`
+}
+
+function getWeekKeys() {
+  const look_ahead = mrp_settings.doc?.look_ahead || 6
+
+  let targetDateStr = null
+  if (treeData.value.length > 0) {
+    targetDateStr = treeData.value[0].target_date
+  }
+
+  let targetDate
+  if (targetDateStr) {
+    targetDate = new Date(targetDateStr)
+  } else if (last_mrp_run.data && last_mrp_run.data.length > 0) {
+    targetDate = new Date(last_mrp_run.data[0].creation)
+  } else {
+    targetDate = new Date()
+  }
+
+  const weeks = []
+  for (let i = 0; i < look_ahead; i++) {
+    const d = new Date(targetDate)
+    d.setDate(d.getDate() + i * 7)
+    const [year, week] = getWeekNumber(d)
+    weeks.push(`${year}-W${String(week).padStart(2, '0')}`)
+  }
+  return weeks
+}
+
+const columns = computed(() => {
+  const staticCols = [
+    {
+      type: 'selection',
+      fixed: 'left',
+    },
+    {
+      title: 'Item Code / Measure',
+      key: 'item_code',
+      filter: true,
+      filterOptionValue: appliedTextFilters.item_code || null,
+      renderFilterMenu: renderTextFilter('item_code', 'Search Item Code'),
+      fixed: 'left',
+      width: 400,
+      sorter: 'default',
+      className: 'item-code-column',
+      render: (row) => {
+        if (row.type === 'HEADER') {
+          return h(
+            'a',
+            {
+              href: `/app/item/${row.item_code}`,
+              target: '_blank',
+              class: 'text-blue-600 hover:underline',
+            },
+            row.item_code,
+          )
+        }
+        const isSelected = row.measure_key === closed_column_field.value
+        return h(
+          'span',
+          { class: ['text-gray-600', isSelected ? 'font-bold' : ''] },
+          row.item_code_display,
+        )
+      },
+    },
+    {
+      title: 'Item Name',
+      key: 'item_name',
+      filter: true,
+      filterOptionValue: appliedTextFilters.item_name || null,
+      renderFilterMenu: renderTextFilter('item_name', 'Search Item Name'),
+      fixed: 'left',
+      width: 200,
+      ellipsis: {
+        tooltip: true,
+      },
+      sorter: 'default',
+      render: (row) => (row.type === 'HEADER' ? row.item_name : ''),
+    },
+    {
+      title: 'Item Group',
+      key: 'item_group',
+      filter: true,
+      filterOptionValue: appliedTextFilters.item_group || null,
+      renderFilterMenu: renderTextFilter('item_group', 'Search Item Group'),
+      width: 120,
+      ellipsis: {
+        tooltip: true,
+      },
+      sorter: 'default',
+
+      render: (row) => (row.type === 'HEADER' ? row.item_group : ''),
+    },
+    {
+      title: 'UoM',
+      key: 'uom',
+      width: 80,
+      ellipsis: {
+        tooltip: true,
+      },
+      sorter: 'default',
+      render: (row) => (row.type === 'HEADER' ? row.uom : ''),
+    },
+    {
+      title: 'BOM',
+      key: 'bom_list',
+      filter: true,
+      filterOptionValue: appliedTextFilters.bom_list || null,
+      renderFilterMenu: renderTextFilter('bom_list', 'Search BOM'),
+      width: 150,
+      ellipsis: {
+        tooltip: true,
+      },
+      render: (row) => (row.type === 'HEADER' ? row.bom_list : ''),
+    },
+    {
+      title: 'Lvl',
+      key: 'bom_level',
+      width: 60,
+      ellipsis: {
+        tooltip: true,
+      },
+      sorter: 'default',
+      render: (row) => (row.type === 'HEADER' ? row.bom_level : ''),
+    },
+    {
+      title: 'Safety Stock',
+      key: 'reorder_level',
+      filter: true,
+      filterOptionValue:
+        appliedNumberFilters.reorder_level.min !== null ||
+        appliedNumberFilters.reorder_level.max !== null ||
+        null,
+      renderFilterMenu: renderNumberFilter('reorder_level'),
+      width: 100,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      sorter: 'default',
+      render: (row) =>
+        row.type === 'HEADER' ? formatQuantity(row.reorder_level) : '',
+    },
+    {
+      title: 'Re-order Qty',
+      key: 'reorder_quantity',
+      filter: true,
+      filterOptionValue:
+        appliedNumberFilters.reorder_quantity.min !== null ||
+        appliedNumberFilters.reorder_quantity.max !== null ||
+        null,
+      renderFilterMenu: renderNumberFilter('reorder_quantity'),
+      width: 100,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      sorter: 'default',
+      render: (row) =>
+        row.type === 'HEADER' ? formatQuantity(row.reorder_quantity) : '',
+    },
+    {
+      title: `Lead Time (${defaultTimeUnit.value})`,
+      key: 'lead_time',
+      filter: true,
+      filterOptionValue:
+        appliedNumberFilters.lead_time.min !== null ||
+        appliedNumberFilters.lead_time.max !== null ||
+        null,
+      renderFilterMenu: renderNumberFilter('lead_time'),
+      width: 100,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      sorter: 'default',
+      render: (row) => (row.type === 'HEADER' ? formatTime(row.lead_time) : ''),
+    },
+    {
+      title: 'Supplier',
+      key: 'default_supplier',
+      filter: true,
+      filterOptionValue: appliedTextFilters.default_supplier || null,
+      renderFilterMenu: renderTextFilter('default_supplier', 'Search Supplier'),
+      width: 120,
+      ellipsis: {
+        tooltip: true,
+      },
+      sorter: 'default',
+
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return mrp_settings.doc?.render_supplier_name
+          ? row.default_supplier_name
+          : row.default_supplier
+      },
+    },
+    {
+      title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
+      key: 'days_to_reorder',
+      filter: true,
+      filterOptionValue:
+        appliedNumberFilters.days_to_reorder.min !== null ||
+        appliedNumberFilters.days_to_reorder.max !== null ||
+        null,
+      renderFilterMenu: renderNumberFilter('days_to_reorder'),
+      width: 110,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      sorter: 'default',
+      render: (row) =>
+        row.type === 'HEADER' ? formatTime(row.days_to_reorder) : '',
+    },
+    {
+      title: `${defaultTimeUnit.value} to Reorder`,
+      key: 'days_to_reorder_excl_reorder_level',
+      filter: true,
+      filterOptionValue:
+        appliedNumberFilters.days_to_reorder_excl_reorder_level.min !== null ||
+        appliedNumberFilters.days_to_reorder_excl_reorder_level.max !== null ||
+        null,
+      renderFilterMenu: renderNumberFilter(
+        'days_to_reorder_excl_reorder_level',
+      ),
+      width: 110,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      sorter: 'default',
+      render: (row) =>
+        row.type === 'HEADER'
+          ? formatTime(row.days_to_reorder_excl_reorder_level)
+          : '',
+    },
+  ]
+
+  const weekCols = getWeekKeys().map((weekKey) => {
+    return {
+      title: () => {
+        return h(
+          'div',
+          { class: 'rotated-header-naive' },
+          getFormattedWeekHeader(weekKey),
+        )
+      },
+      key: weekKey,
+      width: 60,
+      ellipsis: {
+        tooltip: true,
+      },
+      align: 'right',
+      className: 'week-column',
+      cellProps: (row) => {
+        const val = row[weekKey]
+        let measure_key =
+          row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
+        const qField = quantityFields.value.find((f) => f.value === measure_key)
+        if (qField && qField.cellClass) {
+          return { class: qField.cellClass(val, row) }
+        }
+        return {}
+      },
+      render: (row) => {
+        const val = row[weekKey]
+        let measure_key =
+          row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
+        const qField = quantityFields.value.find((f) => f.value === measure_key)
+
+        let formattedVal = formatQuantity(val)
+        if (
+          val === 0 &&
+          ![
+            'on_hand_inventory_no_action',
+            'on_hand_inventory',
+            'on_hand_inventory_excl_reorder_level',
+            'projected_on_hand_inventory_no_action',
+            'projected_on_hand_inventory',
+            'projected_on_hand_inventory_excl_reorder_level',
+          ].includes(measure_key)
+        ) {
+          formattedVal = ''
+        } else if (qField && qField.formatter) {
+          formattedVal = qField.formatter(val)
+        }
+
+        return formattedVal
+      },
+    }
+  })
+
+  const actionsCol = {
+    title: 'Actions',
+    key: 'actions',
+    width: 120,
+    render: (row) => {
+      if (row.type === 'HEADER') {
+        return h(
+          Button,
+          { size: 'sm', onClick: () => handleOpenDialog() },
+          { default: () => 'Planning Detail' },
+        )
+      }
+      return ''
+    },
+  }
+
+  scrollX.value =
+    staticCols.reduce((acc, c) => acc + (c.width || 100), 0) +
+    weekCols.reduce((acc, c) => acc + (c.width || 60), 0) +
+    actionsCol.width
+
+  return staticCols.concat(weekCols, actionsCol)
+})
+
+async function executeAsyncQuery() {
+  loadingRef.value = true
+
+  let itemCodeFilter = null
+  if (onlyShowSuggested.value) {
+    try {
+      const suggestedEntries = await call('frappe.client.get_list', {
         doctype: 'MRP Entry',
-        fields: [
-          'name',
+        filters: { suggested_orders: ['>', 0] },
+        fields: ['item_code'],
+        distinct: 1,
+        limit_page_length: 0,
+      })
+      const suggestedItemCodes = suggestedEntries.map((e) => e.item_code)
+      if (suggestedItemCodes.length === 0) {
+        treeData.value = []
+        paginationReactive.itemCount = 0
+        loadingRef.value = false
+        return
+      }
+      itemCodeFilter = ['in', suggestedItemCodes]
+    } catch (e) {
+      console.error(e)
+      toast.error('Failed to filter suggested orders')
+      loadingRef.value = false
+      return
+    }
+  }
+
+  const backendFilters = [['MRP Entry', 'is_header', '=', 1]]
+  const backendOrFilters = []
+
+  if (itemCodeFilter) {
+    backendFilters.push(['MRP Entry', 'item_code', 'in', itemCodeFilter[1]])
+  }
+
+  Object.keys(appliedTextFilters).forEach((key) => {
+    if (appliedTextFilters[key]) {
+      if (key === 'default_supplier') {
+        backendOrFilters.push([
+          'MRP Entry',
+          'default_supplier',
+          'like',
+          `%${appliedTextFilters[key]}%`,
+        ])
+        backendOrFilters.push([
+          'MRP Entry',
+          'default_supplier_name',
+          'like',
+          `%${appliedTextFilters[key]}%`,
+        ])
+      } else {
+        backendFilters.push([
+          'MRP Entry',
+          key,
+          'like',
+          `%${appliedTextFilters[key]}%`,
+        ])
+      }
+    }
+  })
+
+  Object.keys(appliedNumberFilters).forEach((key) => {
+    if (appliedNumberFilters[key].min !== null) {
+      backendFilters.push([
+        'MRP Entry',
+        key,
+        '>=',
+        appliedNumberFilters[key].min,
+      ])
+    }
+    if (appliedNumberFilters[key].max !== null) {
+      backendFilters.push([
+        'MRP Entry',
+        key,
+        '<=',
+        appliedNumberFilters[key].max,
+      ])
+    }
+  })
+
+  try {
+    const count = await call('frappe.client.get_count', {
+      doctype: 'MRP Entry',
+      filters: backendFilters,
+      or_filters: backendOrFilters.length > 0 ? backendOrFilters : null,
+    })
+
+    paginationReactive.itemCount = count
+
+    let orderBy = 'item_code asc'
+    if (sorterRef.value && sorterRef.value.order) {
+      const sortOrder = sorterRef.value.order === 'ascend' ? 'asc' : 'desc'
+      const columnKey = sorterRef.value.columnKey
+      if (
+        [
           'item_code',
           'item_name',
           'item_group',
-          'bom_list',
           'uom',
           'bom_level',
           'reorder_level',
           'reorder_quantity',
           'lead_time',
           'default_supplier',
-          'urgency_level',
+          'days_to_reorder',
+          'days_to_reorder_excl_reorder_level',
+        ].includes(columnKey)
+      ) {
+        orderBy = `${columnKey} ${sortOrder}`
+      }
+    }
+
+    const items = await call('frappe.client.get_list', {
+      doctype: 'MRP Entry',
+      filters: backendFilters,
+      or_filters: backendOrFilters.length > 0 ? backendOrFilters : null,
+      fields: ['*'],
+      limit_start: (paginationReactive.page - 1) * paginationReactive.pageSize,
+      limit_page_length: paginationReactive.pageSize,
+      order_by: orderBy,
+    })
+
+    const itemCodes = items.map((item) => item.item_code)
+    let details = []
+    if (itemCodes.length > 0) {
+      details = await call('frappe.client.get_list', {
+        doctype: 'MRP Entry',
+        filters: [['item_code', 'in', itemCodes]],
+        fields: [
+          'item_code',
           'target_date',
+          'on_hand_inventory_no_action',
           'on_hand_inventory',
+          'on_hand_inventory_excl_reorder_level',
           'open_orders',
           'total_forecast_demand',
           'scheduled_receipts',
@@ -292,498 +973,367 @@ export default {
           'suggested_orders',
           'suggested_orders_value',
           'suggested_orders_value_payable',
+          'projected_on_hand_inventory_no_action',
           'projected_on_hand_inventory',
+          'projected_on_hand_inventory_excl_reorder_level',
         ],
-        orderBy: 'creation desc',
-        start: 0,
-        pageLength: 500,
-        auto: true,
-        onSuccess() {
-          if (this.$resources.mrp_entries.hasNextPage) {
-            this.$resources.mrp_entries.next()
-          }
-        },
-      }
-    },
-    material_request_creator() {
-      return {
-        url: 'frappe.client.insert',
-        onSuccess: () => {
-          console.log('Material Request created successfully')
-        },
-      }
-    },
-    last_mrp_run() {
-      return {
-        type: 'list',
-        doctype: 'Scheduled Job Log',
-        fields: ['creation'],
-        filters: {
-          scheduled_job_type: 'mrp_run.mrp_run',
-        },
-        orderBy: 'creation desc',
-        pageLength: 1,
-        auto: true,
-      }
-    },
-  },
-  computed: {
-    lastMrpRunTime() {
-      if (this.$resources.last_mrp_run.loading) {
-        return 'Loading...'
-      }
-      if (
-        !this.$resources.last_mrp_run.data ||
-        this.$resources.last_mrp_run.data.length === 0
-      ) {
-        return 'MRP has not run yet.'
-      }
-      const lastRun = this.$resources.last_mrp_run.data[0]
-      if (lastRun) {
-        const d = new Date(lastRun.creation)
-        return `Last MRP Run: ${d.toLocaleString()}`
-      }
-      return 'MRP has not run yet.'
-    },
-    mrpEntryRows() {
-      if (
-        this.$resources.mrp_entries.loading ||
-        !this.$resources.mrp_entries.data
-      ) {
-        return null // AG Grid will show its loading overlay
-      }
-
-      const mrpEntries = this.$resources.mrp_entries.data
-      const items = {}
-
-      mrpEntries.forEach((entry) => {
-        if (!entry.item_code) return
-
-        if (!items[entry.item_code]) {
-          items[entry.item_code] = {
-            name: entry.item_code, // for getRowId
-            item_code: entry.item_code,
-            item_name: entry.item_name,
-            item_group: entry.item_group,
-            bom_list: entry.bom_list,
-            uom: entry.uom,
-            bom_level: entry.bom_level,
-            reorder_level: entry.reorder_level,
-            reorder_quantity: entry.reorder_quantity,
-            lead_time: entry.lead_time,
-            default_supplier: entry.default_supplier,
-            _urgency_levels: [],
-          }
-        }
-
-        items[entry.item_code]._urgency_levels.push(entry.urgency_level)
-
-        if (!entry.target_date) return
-
-        const [year, week] = this.getWeekNumber(new Date(entry.target_date))
-        const weekKey = `${year}-W${String(week).padStart(2, '0')}`
-
-        const fieldsToPivot = [
-          'on_hand_inventory',
-          'open_orders',
-          'total_forecast_demand',
-          'scheduled_receipts',
-          'suggested_receipts',
-          'suggested_orders',
-          'suggested_orders_value',
-          'suggested_orders_value_payable',
-          'projected_on_hand_inventory',
-        ]
-
-        fieldsToPivot.forEach((field) => {
-          items[entry.item_code][`${weekKey}_${field}`] = entry[field]
-        })
+        limit_page_length: 0,
       })
+    }
 
-      Object.values(items).forEach((item) => {
-        const positiveUrgencies = item._urgency_levels.filter((u) => u > 0)
-        item.urgency_level =
-          positiveUrgencies.length > 0 ? Math.min(...positiveUrgencies) : 0
-        delete item._urgency_levels
+    const pivotedDataByItem = {}
+    itemCodes.forEach((code) => {
+      pivotedDataByItem[code] = {}
+    })
+
+    const fieldsToPivot = [
+      'on_hand_inventory_no_action',
+      'on_hand_inventory',
+      'on_hand_inventory_excl_reorder_level',
+      'open_orders',
+      'total_forecast_demand',
+      'scheduled_receipts',
+      'suggested_receipts',
+      'suggested_orders',
+      'suggested_orders_value',
+      'suggested_orders_value_payable',
+      'projected_on_hand_inventory_no_action',
+      'projected_on_hand_inventory',
+      'projected_on_hand_inventory_excl_reorder_level',
+    ]
+
+    details.forEach((entry) => {
+      if (!entry.target_date) return
+      const [year, week] = getWeekNumber(new Date(entry.target_date))
+      const weekKey = `${year}-W${String(week).padStart(2, '0')}`
+      if (!pivotedDataByItem[entry.item_code]) {
+        pivotedDataByItem[entry.item_code] = {}
+      }
+      fieldsToPivot.forEach((field) => {
+        pivotedDataByItem[entry.item_code][`${weekKey}_${field}`] = entry[field]
       })
+    })
 
-      let item_rows = Object.values(items)
+    const weeks = getWeekKeys()
 
-      if (this.onlyShowSuggested) {
-        item_rows = item_rows.filter((row) => {
-          return Object.keys(row).some(
-            (key) => key.endsWith('_suggested_orders') && row[key] > 0,
-          )
-        })
+    treeData.value = items.map((item) => {
+      const row = {
+        ...item,
+        id: item.item_code,
+        type: 'HEADER',
+        isLeaf: false,
+        _itemPivot: pivotedDataByItem[item.item_code] || {},
       }
-
-      return item_rows
-    },
-    dynamicColumnDefs() {
-      const staticColumns = [
-        {
-          headerName: 'Select',
-          checkboxSelection: true,
-          headerCheckboxSelection: true,
-          pinned: 'left',
-          width: 50,
-        },
-        {
-          field: 'item_code',
-          headerName: 'Item Code',
-          sortable: true,
-          filter: true,
-          width: 120,
-          pinned: 'left',
-          cellRenderer: (params) => {
-            if (params.value) {
-              return `<a href="/app/item/${params.value}" target="_blank" class="text-blue-600 hover:underline">${params.value}</a>`
-            }
-            return null
-          },
-        },
-        {
-          field: 'item_name',
-          headerName: 'Item Name',
-          sortable: true,
-          filter: true,
-          pinned: 'left',
-        },
-        {
-          field: 'item_group',
-          headerName: 'Item Group',
-          sortable: true,
-          filter: true,
-          width: 120,
-        },
-        {
-          field: 'uom',
-          headerName: 'Uom',
-          sortable: true,
-          filter: true,
-          width: 100,
-        },
-        {
-          field: 'bom_list',
-          headerName: 'BOM',
-          sortable: false,
-          filter: true,
-          width: 160,
-          wrapText: true,
-          tooltipField: 'bom_list',
-          cellClass: 'bom-clip',
-        },
-        {
-          field: 'bom_level',
-          headerName: 'Lvl',
-          sortable: true,
-          filter: true,
-          width: 70,
-        },
-        {
-          field: 'reorder_level',
-          headerName: 'Safety Stock/Re-order Level',
-          sortable: true,
-          filter: true,
-          width: 110,
-          cellStyle: { textAlign: 'right' },
-          headerClass: 'ag-right-aligned-header',
-        },
-        {
-          field: 'reorder_quantity',
-          headerName: 'Re-order Quantity',
-          sortable: true,
-          filter: true,
-          width: 110,
-          cellStyle: { textAlign: 'right' },
-          headerClass: 'ag-right-aligned-header',
-        },
-        {
-          field: 'lead_time',
-          headerName: 'Lead Time',
-          sortable: true,
-          filter: true,
-          width: 100,
-          cellStyle: { textAlign: 'right' },
-          headerClass: 'ag-right-aligned-header',
-        },
-        {
-          field: 'default_supplier',
-          headerName: 'Supplier',
-          sortable: true,
-          filter: true,
-          width: 120,
-        },
-        {
-          field: 'urgency_level',
-          headerName: 'Urgency Level',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: { textAlign: 'center' },
-          comparator: (valueA, valueB) => {
-            // Custom sorting
-            //	- Ascending follows the order: 1 -> 2 -> 3 -> 0
-            //	- Descending follows the order: 0 -> 3 -> 2 -> 1
-            const valA = valueA === 0 ? 999 : valueA
-            const valB = valueB === 0 ? 999 : valueB
-            return valA - valB
-          },
-          cellRenderer: (params) => {
-            return params.value !== 0
-              ? `⚠️ <b>P${params.value}</b>`
-              : params.value
-          },
-        },
-      ]
-
-      const actionsColumn = {
-        headerName: 'Actions',
-        cellRenderer: 'buttonCellRenderer',
-        cellRendererParams: {
-          onOpenDialog: this.handleOpenDialog,
-        },
-        sortable: false,
-        filter: false,
-      }
-
-      if (
-        this.$resources.mrp_entries.loading ||
-        !this.$resources.mrp_entries.data
-      ) {
-        return staticColumns.concat(actionsColumn)
-      }
-
-      const mrpEntries = this.$resources.mrp_entries.data
-      const weeks = new Set()
-      mrpEntries.forEach((entry) => {
-        if (!entry.target_date) return
-        const [year, week] = this.getWeekNumber(new Date(entry.target_date))
-        const weekKey = `${year}-W${String(week).padStart(2, '0')}`
-        weeks.add(weekKey)
+      weeks.forEach((weekKey) => {
+        row[weekKey] = row._itemPivot[`${weekKey}_${closed_column_field.value}`]
       })
+      return row
+    })
+  } catch (e) {
+    console.error(e)
+    toast.error('Failed to fetch MRP entries')
+  }
 
-      const sortedWeeks = Array.from(weeks).sort()
+  loadingRef.value = false
+}
 
-      const dynamicColumns = sortedWeeks.map((weekKey) => {
-        const openChildren = this.quantityFields.map((qField) => ({
-          ...qField,
-          field: `${weekKey}_${qField.value}`,
-          headerName: qField.label,
-          columnGroupShow: 'open',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: qField.cellStyle || { textAlign: 'right' },
-          headerClass: 'ag-right-aligned-header',
-        }))
+function onLoad(row) {
+  return new Promise((resolve) => {
+    const weeks = getWeekKeys()
+    const children = []
 
-        const closedField = this.quantityFields.find(
-          (f) => f.value === this.closed_column_field,
-        )
+    quantityFields.value.forEach((qField) => {
+      const detailRow = {
+        ...row,
+        id: `${row.item_code}_${qField.value}`,
+        type: 'DETAIL',
+        measure_key: qField.value,
+        item_code_display: qField.label,
+        isLeaf: true,
+      }
+      weeks.forEach((weekKey) => {
+        detailRow[weekKey] = row._itemPivot[`${weekKey}_${qField.value}`]
+      })
+      children.push(detailRow)
+    })
 
-        const closedChild = {
-          field: `${weekKey}_${closedField.value}`,
-          headerName: closedField.label,
-          columnGroupShow: 'closed',
-          sortable: true,
-          filter: true,
-          width: 120,
-          cellStyle: closedField.cellStyle || { textAlign: 'right' },
-          valueFormatter: closedField.valueFormatter,
-          headerClass: 'ag-right-aligned-header',
-        }
+    row.children = children
+    resolve()
+  })
+}
 
-        return {
-          headerName: weekKey,
-          groupId: weekKey,
-          children: [closedChild, ...openChildren],
+function rowKey(rowData) {
+  return rowData.id
+}
+
+function rowClassName(row) {
+  if (row.type === 'HEADER') return 'row-header'
+  if (row.type === 'DETAIL') return 'row-detail'
+  return ''
+}
+
+function handleCheck(keys) {
+  selectedRowKeys.value = keys
+}
+
+function handleFiltersChange() {
+  // handled locally by custom filter renderers now
+}
+
+function handleSorterChange(sorter) {
+  if (!loadingRef.value) {
+    loadingRef.value = true
+    sorterRef.value = sorter
+    paginationReactive.page = 1
+    executeAsyncQuery()
+  }
+}
+
+function handlePageChange(currentPage) {
+  if (!loadingRef.value) {
+    loadingRef.value = true
+    paginationReactive.page = currentPage
+    executeAsyncQuery()
+  }
+}
+
+function handlePageSizeChange(pageSize) {
+  if (!loadingRef.value) {
+    loadingRef.value = true
+    paginationReactive.pageSize = pageSize
+    paginationReactive.page = 1
+    executeAsyncQuery()
+  }
+}
+
+watch(closed_column_field, (newVal) => {
+  const weeks = getWeekKeys()
+  treeData.value.forEach((row) => {
+    if (row._itemPivot) {
+      weeks.forEach((weekKey) => {
+        row[weekKey] = row._itemPivot[`${weekKey}_${newVal}`]
+      })
+    }
+  })
+})
+
+const tableRef = ref(null)
+
+const getCsvHeader = (col) => {
+  if (typeof col.title === 'function') {
+    if (
+      col.key &&
+      typeof col.key === 'string' &&
+      col.key.match(/^\d{4}-W\d{2}$/)
+    ) {
+      return getFormattedWeekHeader(col.key)
+    }
+    return col.key || 'Unknown'
+  }
+  return col.title || col.key || 'Unknown'
+}
+
+const getCsvCell = (value, row, column) => {
+  if (column.key === 'item_code') {
+    return row.type === 'HEADER' ? row.item_code : row.item_code_display
+  }
+  if (column.key === 'item_name')
+    return row.type === 'HEADER' ? row.item_name : ''
+  if (column.key === 'item_group')
+    return row.type === 'HEADER' ? row.item_group : ''
+  if (column.key === 'uom') return row.type === 'HEADER' ? row.uom : ''
+  if (column.key === 'bom_list')
+    return row.type === 'HEADER' ? row.bom_list : ''
+  if (column.key === 'bom_level')
+    return row.type === 'HEADER' ? row.bom_level : ''
+  if (column.key === 'reorder_level')
+    return row.type === 'HEADER' ? row.reorder_level : ''
+  if (column.key === 'reorder_quantity')
+    return row.type === 'HEADER' ? row.reorder_quantity : ''
+  if (column.key === 'lead_time')
+    return row.type === 'HEADER' ? row.lead_time : ''
+  if (column.key === 'default_supplier') {
+    if (row.type !== 'HEADER') return ''
+    return mrp_settings.doc?.render_supplier_name
+      ? row.default_supplier_name
+      : row.default_supplier
+  }
+  if (column.key === 'days_to_reorder')
+    return row.type === 'HEADER' ? row.days_to_reorder : ''
+  if (column.key === 'days_to_reorder_excl_reorder_level')
+    return row.type === 'HEADER' ? row.days_to_reorder_excl_reorder_level : ''
+
+  if (
+    column.key &&
+    typeof column.key === 'string' &&
+    column.key.match(/^\d{4}-W\d{2}$/)
+  ) {
+    const val = row[column.key]
+    let measure_key =
+      row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
+    if (
+      val === 0 &&
+      ![
+        'on_hand_inventory_no_action',
+        'on_hand_inventory',
+        'on_hand_inventory_excl_reorder_level',
+        'projected_on_hand_inventory_no_action',
+        'projected_on_hand_inventory',
+        'projected_on_hand_inventory_excl_reorder_level',
+      ].includes(measure_key)
+    ) {
+      return ''
+    }
+    return val !== undefined && val !== null ? val : ''
+  }
+
+  return value !== undefined && value !== null ? value : ''
+}
+
+function exportToCsv() {
+  tableRef.value?.downloadCsv({ fileName: 'mrp-export' })
+}
+
+function clearFilters() {
+  Object.keys(textFilters).forEach((k) => {
+    textFilters[k] = ''
+    appliedTextFilters[k] = ''
+  })
+  Object.keys(numberFilters).forEach((k) => {
+    numberFilters[k].min = null
+    numberFilters[k].max = null
+    appliedNumberFilters[k].min = null
+    appliedNumberFilters[k].max = null
+  })
+  paginationReactive.page = 1
+  executeAsyncQuery()
+}
+
+function rerunMrp() {
+  call('erpnext_mrp.mrp.tasks.mrp_run.trigger_mrp_run').then(() => {
+    toast.success('MRP Calculation Started')
+    showRerunDialog.value = true
+  })
+}
+
+function handleOpenDialog() {
+  showDialog.value = true
+}
+
+async function openCreateRequestDialog() {
+  const summary = []
+
+  for (const row of treeData.value) {
+    if (selectedRowKeys.value.includes(row.id) && !row._itemPivot) {
+      await onLoad(row)
+    }
+  }
+
+  const flatData = []
+  treeData.value.forEach((node) => {
+    flatData.push(node)
+    if (node.children) {
+      flatData.push(...node.children)
+    }
+  })
+
+  const selectedRowObjects = flatData.filter((r) =>
+    selectedRowKeys.value.includes(r.id),
+  )
+
+  selectedRowObjects.forEach((row) => {
+    if (row.type === 'DETAIL' && row.measure_key !== 'suggested_orders') return
+
+    if (row.type === 'DETAIL') {
+      Object.keys(row).forEach((key) => {
+        if (key.match(/^\d{4}-W\d{2}$/) && row[key] > 0) {
+          summary.push({
+            item_code: row.item_code,
+            quantity: row[key],
+            week: key,
+            supplier: null,
+          })
         }
       })
+    }
 
-      return staticColumns.concat(dynamicColumns, actionsColumn)
-    },
-    quantityFields() {
-      return [
-        { value: 'on_hand_inventory', label: 'On Hand Inventory' },
-        { value: 'open_orders', label: 'Open Sales/Work Orders' },
-        { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
-        { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
-        { value: 'suggested_receipts', label: 'Suggested Receipts' },
-        {
-          value: 'suggested_orders',
-          label: 'Suggested Orders',
-          cellStyle: (params) =>
-            params.value > 0
-              ? { background: '#ddeeff', textAlign: 'right' }
-              : { textAlign: 'right' },
-        },
-        {
-          value: 'suggested_orders_value',
-          label: 'Suggested Orders Value',
-          cellStyle: { textAlign: 'right' },
-          valueFormatter: (params) =>
-            params.value > 0 ? this.formatCurrency(params.value) : '',
-        },
-        {
-          value: 'suggested_orders_value_payable',
-          label: 'Suggested Orders Payable',
-          cellStyle: { textAlign: 'right' },
-          valueFormatter: (params) =>
-            params.value > 0 ? this.formatCurrency(params.value) : '',
-        },
-        {
-          value: 'projected_on_hand_inventory',
-          label: 'Projected On Hand Inventory',
-        },
-      ]
-    },
-    isLoading() {
-      return this.$resources.mrp_entries.loading
-    },
-  },
-  methods: {
-    formatCurrency(value) {
-      if (value === null || value === undefined) return ''
-      const currency = window.sysdefaults?.currency
-      return formatCurrency(value, null, currency)
-    },
-    exportToCsv() {
-      this.gridApi.exportDataAsCsv({ allColumns: true })
-    },
-    onGridReady(params) {
-      this.gridApi = params.api
-      this.columnApi = params.columnApi
-    },
-    clearFilters() {
-      this.gridApi.setFilterModel(null)
-    },
-    rerunMrp() {
-      call('erpnext_mrp.mrp.tasks.mrp_run.mrp_run').then(() => {
-        toast.success('MRP Calculation Started')
-        this.showRerunDialog = true
-      })
-    },
-    reload() {
-      this.$resources.mrp_entries.reload()
-    },
-    handleOpenDialog() {
-      // New method to be called by the button in the cell
-      this.showDialog = true
-      console.log('MaterialRequestList: showDialog is now true') // For verification
-    },
-    getRowId(params) {
-      return params.data.name
-    },
-    getRowStyle(params) {
-      if (params.data && params.data.urgency_level === 1) {
-        return { background: '#ffdddd' }
-      } else if (params.data && params.data.urgency_level === 2) {
-        return { background: '#eab26eff' }
-      }
-      return null
-    },
-    // From https://stackoverflow.com/a/6117889
-    getWeekNumber(d) {
-      // Copy date so don't modify original
-      d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
-      // Set to nearest Thursday: current date + 4 - current day number
-      // Make Sunday's day number 7
-      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
-      // Get first day of year
-      var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-      // Calculate full weeks to nearest Thursday
-      var weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
-      // Return array of year and week number
-      return [d.getUTCFullYear(), weekNo]
-    },
-    onSelectionChanged() {
-      this.selectedRows = this.gridApi.getSelectedRows()
-    },
-    async openCreateRequestDialog() {
-      const summary = []
-      this.selectedRows.forEach((row) => {
-        Object.keys(row).forEach((key) => {
-          if (key.endsWith('_suggested_orders') && row[key] > 0) {
+    if (row.type === 'HEADER') {
+      if (row._itemPivot) {
+        Object.keys(row._itemPivot).forEach((key) => {
+          if (key.endsWith('_suggested_orders') && row._itemPivot[key] > 0) {
             const week = key.split('_suggested_orders')[0]
             summary.push({
               item_code: row.item_code,
-              quantity: row[key],
+              quantity: row._itemPivot[key],
               week: week,
               supplier: row.default_supplier,
             })
           }
         })
-      })
-      this.selectedItemsSummary = summary
-
-      await nextTick()
-
-      this.showCreateDialog = true
-    },
-    async confirmCreateMaterialRequest() {
-      try {
-        const createdDocs = await this.createMaterialRequest(
-          this.selectedItemsSummary,
-        )
-        this.newlyCreatedDocs = createdDocs
-        this.showSuccessDialog = true
-        this.showCreateDialog = false
-        this.gridApi.deselectAll()
-      } catch (error) {
-        console.error('Failed to create Material Request:', error)
-        // Maybe show an error message
       }
-    },
-    getDateFromWeek(weekStr) {
-      if (!weekStr) return null
-      const [year, week] = weekStr.split('-W').map(Number)
+    }
+  })
 
-      const d = new Date(Date.UTC(year, 0, 4)) // Start with Jan 4th, which is always in week 1
-      d.setUTCDate(d.getUTCDate() + (week - 1) * 7) // Go to the desired week
-      d.setUTCDate(d.getUTCDate() - (d.getUTCDay() || 7) + 1) // Go to Monday of that week
+  const uniqueSummary = {}
+  summary.forEach((s) => {
+    const key = `${s.item_code}_${s.week}`
+    uniqueSummary[key] = s
+  })
+  selectedItemsSummary.value = Object.values(uniqueSummary)
 
-      return d.toISOString().split('T')[0] // Format as YYYY-MM-DD
-    },
-    async createMaterialRequest(items) {
-      const itemsBySupplier = items.reduce((acc, item) => {
-        const supplier = item.supplier || 'No Supplier'
-        if (!acc[supplier]) {
-          acc[supplier] = []
-        }
-        acc[supplier].push(item)
-        return acc
-      }, {})
+  await nextTick()
+  showCreateDialog.value = true
+}
 
-      const createdDocs = []
-      for (const supplierItems of Object.values(itemsBySupplier)) {
-        const materialRequestDoc = {
-          doctype: 'Material Request',
-          material_request_type: 'Purchase',
-          schedule_date: this.getDateFromWeek(supplierItems[0].week),
-          items: supplierItems.map((item) => ({
-            item_code: item.item_code,
-            qty: item.quantity,
-            schedule_date: this.getDateFromWeek(item.week),
-          })),
-        }
-        if (
-          supplierItems[0].supplier &&
-          supplierItems[0].supplier !== 'No Supplier'
-        ) {
-          materialRequestDoc.supplier = supplierItems[0].supplier
-        }
+async function createMaterialRequest(items) {
+  const itemsBySupplier = items.reduce((acc, item) => {
+    const supplier = item.supplier || 'No Supplier'
+    if (!acc[supplier]) {
+      acc[supplier] = []
+    }
+    acc[supplier].push(item)
+    return acc
+  }, {})
 
-        const newDoc = await this.$resources.material_request_creator.submit({
-          doc: materialRequestDoc,
-        })
-        if (newDoc) {
-          createdDocs.push(newDoc)
-        }
-      }
-      return createdDocs
-    },
-  },
+  const createdDocs = []
+  for (const supplierItems of Object.values(itemsBySupplier)) {
+    const materialRequestDoc = {
+      doctype: 'Material Request',
+      material_request_type: 'Purchase',
+      schedule_date: getDateFromWeek(supplierItems[0].week),
+      items: supplierItems.map((item) => ({
+        item_code: item.item_code,
+        qty: item.quantity,
+        schedule_date: getDateFromWeek(item.week),
+      })),
+    }
+    if (
+      supplierItems[0].supplier &&
+      supplierItems[0].supplier !== 'No Supplier'
+    ) {
+      materialRequestDoc.supplier = supplierItems[0].supplier
+    }
+
+    const newDoc = await material_request_creator.submit({
+      doc: materialRequestDoc,
+    })
+    if (newDoc) {
+      createdDocs.push(newDoc)
+    }
+  }
+  return createdDocs
+}
+
+async function confirmCreateMaterialRequest() {
+  try {
+    const createdDocs = await createMaterialRequest(selectedItemsSummary.value)
+    newlyCreatedDocs.value = createdDocs
+    showSuccessDialog.value = true
+    showCreateDialog.value = false
+    selectedRowKeys.value = []
+  } catch (error) {
+    console.error('Failed to create Material Request:', error)
+  }
 }
 </script>
 
@@ -793,39 +1343,62 @@ export default {
   line-height: 1.2;
 }
 
-.ag-theme-alpine .ag-cell-label-container {
-  flex-direction: row;
-  flex-wrap: wrap;
+.rotated-header-naive {
+  transform: rotate(-90deg);
+  white-space: nowrap;
+  width: 30px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -5px;
 }
 
-.ag-theme-alpine .ag-header-cell-label {
-  display: contents;
+.n-data-table-th {
+  vertical-align: bottom !important;
 }
 
-.ag-theme-alpine .ag-header-cell-filter-button {
-  order: 1;
-  margin-right: 4px;
+/* Fix table header height for rotation */
+.n-data-table-thead {
+  height: 140px;
 }
 
-.ag-theme-alpine .ag-sort-indicator-container {
-  order: 2;
+/* Fix for Naive UI tree table ellipsis wrapping causing double height and offset */
+.n-data-table-td {
+  white-space: nowrap;
 }
 
-.ag-theme-alpine .ag-header-cell-text {
-  order: 3;
-  width: 100%;
-  margin-top: 2px;
+/* Reduce whitespace */
+.n-data-table-td {
+  padding: 4px !important;
+}
+</style>
+
+<style scoped>
+/* Cell Coloring Rules */
+:deep(.suggested-order) {
+  background-color: #ddeeff !important;
+}
+:deep(.shortage) {
+  background-color: #fed7d7 !important;
+}
+:deep(.below-safety) {
+  background-color: #fff2cc !important;
 }
 
-.ag-theme-alpine .ag-right-aligned-header .ag-cell-label-container {
-  justify-content: flex-end;
+/* Header vs Detail Row Styling */
+:deep(.row-header .item-code-column) {
+  font-weight: 600;
+}
+:deep(.row-detail .item-code-column) {
+  padding-left: 24px !important;
 }
 
-.ag-theme-alpine .ag-right-aligned-header .ag-header-cell-text {
-  text-align: right;
+/* Active Filter Icon Indication */
+:deep(.n-data-table-filter--active) {
+  color: #18a058 !important; /* Naive UI success color (green) */
 }
-
-.ag-theme-alpine {
-  z-index: 0;
+:deep(.n-data-table-filter--active .n-base-icon) {
+  color: #18a058 !important;
 }
 </style>

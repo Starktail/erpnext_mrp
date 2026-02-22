@@ -20,7 +20,7 @@ By analyzing demand from sales orders and forecasts, and considering current inv
 
 - [Frappe Framework](https://frappe.io/framework): A full-stack web application framework written in Python and Javascript. The framework provides a robust foundation for building web applications, including a database abstraction layer, user authentication, and a REST API.
 - [Frappe UI](https://ui.frappe.io/): A set of components and utilities for rapid UI development for Frappe apps.
-- [AG Grid](https://www.ag-grid.com/)
+- [Naive UI for its Data Table](https://www.naiveui.com/en-US/os-theme/components/data-table)
 
 ## Installation
 
