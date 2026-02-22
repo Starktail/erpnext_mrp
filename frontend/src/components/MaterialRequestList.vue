@@ -174,7 +174,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick, h, onMounted } from 'vue'
-import { NDataTable, NInput } from 'naive-ui'
+import { NDataTable, NInput, NInputNumber, NSpace } from 'naive-ui'
 import {
   Button,
   Dialog,
@@ -199,10 +199,127 @@ const showRerunDialog = ref(false)
 const onlyShowSuggested = ref(false)
 const itemCodeSearch = ref('')
 
-const filtersRef = reactive({
-  item_group: null,
-  default_supplier: null,
+const textFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
 })
+
+const numberFilters = reactive({
+  reorder_level: { min: null, max: null },
+  reorder_quantity: { min: null, max: null },
+  lead_time: { min: null, max: null },
+  days_to_reorder: { min: null, max: null },
+  days_to_reorder_excl_reorder_level: { min: null, max: null },
+})
+
+function renderTextFilter(columnKey, placeholder) {
+  return ({ hide }) => {
+    return h('div', { style: { padding: '8px', width: '250px' } }, [
+      h(NInput, {
+        value: textFilters[columnKey],
+        'onUpdate:value': (v) => {
+          textFilters[columnKey] = v
+        },
+        placeholder: placeholder,
+        size: 'small',
+        style: { marginBottom: '8px' },
+        onKeyup: (e) => {
+          if (e.key === 'Enter') {
+            paginationReactive.page = 1
+            executeAsyncQuery()
+            hide()
+          }
+        },
+      }),
+      h(NSpace, { justify: 'end' }, () => [
+        h(
+          Button,
+          {
+            size: 'sm',
+            onClick: () => {
+              textFilters[columnKey] = ''
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Clear',
+        ),
+        h(
+          Button,
+          {
+            size: 'sm',
+            variant: 'solid',
+            onClick: () => {
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Search',
+        ),
+      ]),
+    ])
+  }
+}
+
+function renderNumberFilter(columnKey) {
+  return ({ hide }) => {
+    return h('div', { style: { padding: '8px', width: '250px' } }, [
+      h(NSpace, { vertical: true, style: { marginBottom: '8px' } }, () => [
+        h(NInputNumber, {
+          value: numberFilters[columnKey].min,
+          'onUpdate:value': (v) => {
+            numberFilters[columnKey].min = v
+          },
+          placeholder: 'Min',
+          size: 'small',
+          clearable: true,
+        }),
+        h(NInputNumber, {
+          value: numberFilters[columnKey].max,
+          'onUpdate:value': (v) => {
+            numberFilters[columnKey].max = v
+          },
+          placeholder: 'Max',
+          size: 'small',
+          clearable: true,
+        }),
+      ]),
+      h(NSpace, { justify: 'end' }, () => [
+        h(
+          Button,
+          {
+            size: 'sm',
+            onClick: () => {
+              numberFilters[columnKey].min = null
+              numberFilters[columnKey].max = null
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Clear',
+        ),
+        h(
+          Button,
+          {
+            size: 'sm',
+            variant: 'solid',
+            onClick: () => {
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Filter',
+        ),
+      ]),
+    ])
+  }
+}
+
 const sorterRef = ref(null)
 
 const paginationReactive = reactive({
@@ -435,6 +552,8 @@ const columns = computed(() => {
     {
       title: 'Item Code / Measure',
       key: 'item_code',
+      filter: true,
+      renderFilterMenu: renderTextFilter('item_code', 'Search Item Code'),
       fixed: 'left',
       width: 400,
       sorter: 'default',
@@ -457,6 +576,8 @@ const columns = computed(() => {
     {
       title: 'Item Name',
       key: 'item_name',
+      filter: true,
+      renderFilterMenu: renderTextFilter('item_name', 'Search Item Name'),
       fixed: 'left',
       width: 200,
       ellipsis: {
@@ -468,14 +589,14 @@ const columns = computed(() => {
     {
       title: 'Item Group',
       key: 'item_group',
+      filter: true,
+      renderFilterMenu: renderTextFilter('item_group', 'Search Item Group'),
       width: 120,
       ellipsis: {
         tooltip: true,
       },
       sorter: 'default',
-      filterMultiple: true,
-      filterOptionValues: filtersRef.item_group,
-      filterOptions: itemGroupOptions.value,
+
       render: (row) => (row.type === 'HEADER' ? row.item_group : ''),
     },
     {
@@ -491,15 +612,13 @@ const columns = computed(() => {
     {
       title: 'BOM',
       key: 'bom_list',
-      width: 120,
-      render: (row) =>
-        row.type === 'HEADER'
-          ? h(
-              'div',
-              { class: 'bom-clip', title: row.bom_list || '' },
-              row.bom_list || '',
-            )
-          : '',
+      filter: true,
+      renderFilterMenu: renderTextFilter('bom_list', 'Search BOM'),
+      width: 150,
+      ellipsis: {
+        tooltip: true,
+      },
+      render: (row) => (row.type === 'HEADER' ? row.bom_list : ''),
     },
     {
       title: 'Lvl',
@@ -514,6 +633,8 @@ const columns = computed(() => {
     {
       title: 'Safety Stock',
       key: 'reorder_level',
+      filter: true,
+      renderFilterMenu: renderNumberFilter('reorder_level'),
       width: 100,
       ellipsis: {
         tooltip: true,
@@ -526,6 +647,8 @@ const columns = computed(() => {
     {
       title: 'Re-order Qty',
       key: 'reorder_quantity',
+      filter: true,
+      renderFilterMenu: renderNumberFilter('reorder_quantity'),
       width: 100,
       ellipsis: {
         tooltip: true,
@@ -538,6 +661,8 @@ const columns = computed(() => {
     {
       title: `Lead Time (${defaultTimeUnit.value})`,
       key: 'lead_time',
+      filter: true,
+      renderFilterMenu: renderNumberFilter('lead_time'),
       width: 100,
       ellipsis: {
         tooltip: true,
@@ -549,19 +674,21 @@ const columns = computed(() => {
     {
       title: 'Supplier',
       key: 'default_supplier',
+      filter: true,
+      renderFilterMenu: renderTextFilter('default_supplier', 'Search Supplier'),
       width: 120,
       ellipsis: {
         tooltip: true,
       },
       sorter: 'default',
-      filterMultiple: true,
-      filterOptionValues: filtersRef.default_supplier,
-      filterOptions: supplierOptions.value,
+
       render: (row) => (row.type === 'HEADER' ? row.default_supplier : ''),
     },
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
+      filter: true,
+      renderFilterMenu: renderNumberFilter('days_to_reorder'),
       width: 110,
       ellipsis: {
         tooltip: true,
@@ -574,6 +701,10 @@ const columns = computed(() => {
     {
       title: `${defaultTimeUnit.value} to Reorder`,
       key: 'days_to_reorder_excl_reorder_level',
+      filter: true,
+      renderFilterMenu: renderNumberFilter(
+        'days_to_reorder_excl_reorder_level',
+      ),
       width: 110,
       ellipsis: {
         tooltip: true,
@@ -694,12 +825,26 @@ async function executeAsyncQuery() {
     }
   }
 
-  const backendFilters = { is_header: 1 }
-  if (itemCodeFilter) backendFilters.item_code = itemCodeFilter
-  if (filtersRef.item_group && filtersRef.item_group.length > 0)
-    backendFilters.item_group = ['in', filtersRef.item_group]
-  if (filtersRef.default_supplier && filtersRef.default_supplier.length > 0)
-    backendFilters.default_supplier = ['in', filtersRef.default_supplier]
+  const backendFilters = [['MRP Entry', 'is_header', '=', 1]]
+
+  if (itemCodeFilter) {
+    backendFilters.push(['MRP Entry', 'item_code', 'in', itemCodeFilter[1]])
+  }
+
+  Object.keys(textFilters).forEach((key) => {
+    if (textFilters[key]) {
+      backendFilters.push(['MRP Entry', key, 'like', `%${textFilters[key]}%`])
+    }
+  })
+
+  Object.keys(numberFilters).forEach((key) => {
+    if (numberFilters[key].min !== null) {
+      backendFilters.push(['MRP Entry', key, '>=', numberFilters[key].min])
+    }
+    if (numberFilters[key].max !== null) {
+      backendFilters.push(['MRP Entry', key, '<=', numberFilters[key].max])
+    }
+  })
 
   try {
     const count = await call('frappe.client.get_count', {
@@ -838,15 +983,8 @@ function handleCheck(keys) {
   selectedRowKeys.value = keys
 }
 
-function handleFiltersChange(filters) {
-  if (!loadingRef.value) {
-    loadingRef.value = true
-    Object.keys(filters).forEach((key) => {
-      filtersRef[key] = Array.isArray(filters[key]) ? filters[key] : []
-    })
-    paginationReactive.page = 1
-    executeAsyncQuery()
-  }
+function handleFiltersChange() {
+  // handled locally by custom filter renderers now
 }
 
 function handleSorterChange(sorter) {
@@ -896,7 +1034,12 @@ function exportToCsv() {
 }
 
 function clearFilters() {
-  toast.info('Filter clearing requires custom filter columns in Naive UI')
+  Object.keys(textFilters).forEach((k) => (textFilters[k] = ''))
+  Object.keys(numberFilters).forEach((k) => {
+    numberFilters[k].min = null
+    numberFilters[k].max = null
+  })
+  executeAsyncQuery()
 }
 
 function rerunMrp() {
