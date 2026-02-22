@@ -11,7 +11,8 @@ The `MRP Settings` doctype allows you to configure various parameters for the MR
 -   **Custom Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
 -   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
 -   **Custom Purchase Order Item Delivery Date Field**: This setting allows you to select a mandatory Date DocField from the `Purchase Order Item` doctype. This field will be used as the delivery date for calculating `Ordered Qty` in the MRP run. By default, `schedule_date` is used.
--   **Custom Re-order Qty Item Field**: Here you can select another `Item` DocField to be used as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field 
+-   **Custom Re-order Qty Item Field**: Here you can select another `Item` DocField to be used as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field.
+-   **Assume Remaining Quantity**: When calculating scheduled receipts from open Purchase Orders, this setting determines whether to include partially received order items. If enabled, the remaining unreceived quantity is considered as expected supply. If disabled, partially received items are ignored.
 
 The calculation is executed in several distinct stages:
 
@@ -40,7 +41,7 @@ Next, the system calculates all sources of demand.
 The system then calculates all sources of future supply.
 
 - **Planned Qty**: Calculates scheduled receipts from open Work Orders for manufactured items.
-- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items. The delivery date for these receipts is determined by the `Purchase Order Item Delivery Date Field` set in `MRP Settings`.
+- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items. The delivery date for these receipts is determined by the `Purchase Order Item Delivery Date Field` set in `MRP Settings`. Partially received orders are handled based on the `Assume Remaining Quantity` setting.
 
 ### 5. Totals and Projections
 

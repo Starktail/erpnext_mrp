@@ -8,10 +8,10 @@ The MRP Workbench is the primary user interface for viewing and interacting with
 
 The workbench displays the MRP data in a pivoted grid:
 
--   **Rows**: Each row represents a single stock item.
+-   **Rows**: Each primary row represents a single stock item. You can expand these item rows to reveal detail rows, which break down the calculation for each specific metric (e.g., `On Hand Inventory`, `Open Sales/Work Orders`, `Suggested Receipts`) across the time horizon.
 -   **Columns**: The columns are structured to show both static item information and time-phased planning data.
-    -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `BOM`, `BOM Level`, `Reorder Level`, `Lead Time`, and `Default Supplier`.
-    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). Each weekly column is a group that can be expanded to show detailed fields for that week (`On Hand Inventory`, `Open Sales/Work Orders`, `Suggested Receipts`, etc.) or collapsed to show a single key figure (defaulting to `Suggested Orders`).
+    -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `UoM`, `BOM`, `Lvl`, `Safety Stock`, `Re-order Qty`, `Lead Time`, `Supplier`, and `Days to Reorder`.
+    -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). For the primary item rows, these columns display a single key figure determined by the field selector. For the expanded detail rows, they show the value for that specific metric.
 
 ### Key Features and Actions
 
@@ -21,7 +21,7 @@ The workbench includes several features to help you analyze and manage your mate
 -   **Rerun MRP Calculations**: This action triggers a background job to recalculate the entire material requirements plan. A dialog will appear to confirm that the process has started and will provide a link to monitor the background job's progress. Once the calculation is complete, you can reload the page to see the updated plan.
 -   **Export to CSV**: Export the current view of the MRP grid to a CSV file for offline analysis or reporting.
 -   **Only show items with suggested orders**: A checkbox that filters the grid to display only those items that have a `Suggested Order` quantity greater than zero in at least one of the weekly time buckets.
-- **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns when they are collapsed. This is useful for quickly scanning key metrics like `Suggested Orders`, `Projected On Hand Inventory`, or `Suggested Orders Value Payable` across the timeline.
+- **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns for the primary item rows. This is useful for quickly scanning key metrics like `Suggested Orders`, `Projected On Hand Inventory`, or `Suggested Orders Value Payable` across the timeline without needing to expand the rows.
 -   **Visual Cues**: The grid uses color coding to draw attention to important items:
     -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates a **P1 - Critical** urgent item. This means the item is required and there is not enough quantity on order.
     -   <span style="background-color: #eab26eff;">Orange Highlight</span>: Indicates a **P2 - Attention** urgent item. This means there is enough quantity on order, but it's scheduled to arrive late.
