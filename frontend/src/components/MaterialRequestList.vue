@@ -40,6 +40,7 @@
 
     <div class="w-full flex-grow">
       <n-data-table
+        ref="tableRef"
         remote
         :columns="columns"
         :data="treeData"
@@ -51,6 +52,8 @@
         :pagination="paginationReactive"
         :checked-row-keys="selectedRowKeys"
         :row-class-name="rowClassName"
+        :get-csv-cell="getCsvCell"
+        :get-csv-header="getCsvHeader"
         @update:checked-row-keys="handleCheck"
         @update:filters="handleFiltersChange"
         @update:sorter="handleSorterChange"
@@ -1114,8 +1117,81 @@ watch(closed_column_field, (newVal) => {
   })
 })
 
+const tableRef = ref(null)
+
+const getCsvHeader = (col) => {
+  if (typeof col.title === 'function') {
+    if (
+      col.key &&
+      typeof col.key === 'string' &&
+      col.key.match(/^\d{4}-W\d{2}$/)
+    ) {
+      return getFormattedWeekHeader(col.key)
+    }
+    return col.key || 'Unknown'
+  }
+  return col.title || col.key || 'Unknown'
+}
+
+const getCsvCell = (value, row, column) => {
+  if (column.key === 'item_code') {
+    return row.type === 'HEADER' ? row.item_code : row.item_code_display
+  }
+  if (column.key === 'item_name')
+    return row.type === 'HEADER' ? row.item_name : ''
+  if (column.key === 'item_group')
+    return row.type === 'HEADER' ? row.item_group : ''
+  if (column.key === 'uom') return row.type === 'HEADER' ? row.uom : ''
+  if (column.key === 'bom_list')
+    return row.type === 'HEADER' ? row.bom_list : ''
+  if (column.key === 'bom_level')
+    return row.type === 'HEADER' ? row.bom_level : ''
+  if (column.key === 'reorder_level')
+    return row.type === 'HEADER' ? row.reorder_level : ''
+  if (column.key === 'reorder_quantity')
+    return row.type === 'HEADER' ? row.reorder_quantity : ''
+  if (column.key === 'lead_time')
+    return row.type === 'HEADER' ? row.lead_time : ''
+  if (column.key === 'default_supplier') {
+    if (row.type !== 'HEADER') return ''
+    return mrp_settings.doc?.render_supplier_name
+      ? row.default_supplier_name
+      : row.default_supplier
+  }
+  if (column.key === 'days_to_reorder')
+    return row.type === 'HEADER' ? row.days_to_reorder : ''
+  if (column.key === 'days_to_reorder_excl_reorder_level')
+    return row.type === 'HEADER' ? row.days_to_reorder_excl_reorder_level : ''
+
+  if (
+    column.key &&
+    typeof column.key === 'string' &&
+    column.key.match(/^\d{4}-W\d{2}$/)
+  ) {
+    const val = row[column.key]
+    let measure_key =
+      row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
+    if (
+      val === 0 &&
+      ![
+        'on_hand_inventory_no_action',
+        'on_hand_inventory',
+        'on_hand_inventory_excl_reorder_level',
+        'projected_on_hand_inventory_no_action',
+        'projected_on_hand_inventory',
+        'projected_on_hand_inventory_excl_reorder_level',
+      ].includes(measure_key)
+    ) {
+      return ''
+    }
+    return val !== undefined && val !== null ? val : ''
+  }
+
+  return value !== undefined && value !== null ? value : ''
+}
+
 function exportToCsv() {
-  toast.error('CSV Export not currently implemented for this table view.')
+  tableRef.value?.downloadCsv({ fileName: 'mrp-export' })
 }
 
 function clearFilters() {
