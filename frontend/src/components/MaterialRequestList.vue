@@ -570,7 +570,12 @@ const columns = computed(() => {
             row.item_code,
           )
         }
-        return h('span', { class: 'text-gray-600' }, row.item_code_display)
+        const isSelected = row.measure_key === closed_column_field.value
+        return h(
+          'span',
+          { class: ['text-gray-600', isSelected ? 'font-bold' : ''] },
+          row.item_code_display,
+        )
       },
     },
     {
