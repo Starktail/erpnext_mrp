@@ -715,6 +715,10 @@ def _update_ordered_qty():
 
 	receiving_date_expression = f"po_item.`{receiving_date_field}`"
 
+	partial_receipt_condition = ""
+	if not settings.assume_remaining_qty:
+		partial_receipt_condition = "AND (po_item.received_qty = 0 OR po_item.received_qty IS NULL)"
+
 	sql_query = f"""# nosemgrep: frappe-sql-format-injection
         SELECT
             po_item.item_code,
@@ -731,6 +735,7 @@ def _update_ordered_qty():
             AND po.docstatus = 1
             AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
             AND {receiving_date_expression} <= %(end_date)s
+            {partial_receipt_condition}
         GROUP BY
             po_item.item_code,
             calendar_week;
