@@ -15,6 +15,7 @@
   "item_name",
   "item_group",
   "default_supplier",
+  "default_supplier_name",
   "uom",
   "reorder_level",
   "reorder_quantity",
@@ -323,12 +324,19 @@
    "fieldname": "is_header",
    "fieldtype": "Check",
    "label": "Is Period 0"
+  },
+  {
+   "fetch_from": "default_supplier.supplier_name",
+   "fieldname": "default_supplier_name",
+   "fieldtype": "Link",
+   "label": "Default Supplier Name",
+   "options": "Supplier"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-21 13:57:53.780632",
+ "modified": "2026-02-22 13:38:51.772685",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

@@ -18,7 +18,8 @@
   "column_break_bdmb",
   "html_rsvb",
   "display_settings_section",
-  "default_time_unit"
+  "default_time_unit",
+  "render_supplier_name"
  ],
  "fields": [
   {
@@ -108,13 +109,19 @@
    "fieldtype": "Select",
    "label": "Default time unit",
    "options": "Weeks\nDays"
+  },
+  {
+   "default": "1",
+   "fieldname": "render_supplier_name",
+   "fieldtype": "Check",
+   "label": "Render Supplier Name instead of Supplier ID"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-19 15:54:26.184347",
+ "modified": "2026-02-22 13:39:40.337225",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

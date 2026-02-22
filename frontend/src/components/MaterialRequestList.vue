@@ -197,7 +197,6 @@ const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
 const onlyShowSuggested = ref(false)
-const itemCodeSearch = ref('')
 
 const textFilters = reactive({
   item_code: '',
@@ -334,34 +333,7 @@ const treeData = ref([])
 const scrollX = ref(2500)
 const loadingRef = ref(true)
 
-const itemGroupOptions = ref([])
-const supplierOptions = ref([])
-
 onMounted(async () => {
-  call('frappe.client.get_list', {
-    doctype: 'MRP Entry',
-    filters: { is_header: 1 },
-    fields: ['item_group'],
-    distinct: 1,
-    limit_page_length: 0,
-  }).then((res) => {
-    itemGroupOptions.value = res
-      .filter((r) => r.item_group)
-      .map((r) => ({ label: r.item_group, value: r.item_group }))
-  })
-
-  call('frappe.client.get_list', {
-    doctype: 'MRP Entry',
-    filters: { is_header: 1 },
-    fields: ['default_supplier'],
-    distinct: 1,
-    limit_page_length: 0,
-  }).then((res) => {
-    supplierOptions.value = res
-      .filter((r) => r.default_supplier)
-      .map((r) => ({ label: r.default_supplier, value: r.default_supplier }))
-  })
-
   executeAsyncQuery()
 })
 
@@ -687,7 +659,12 @@ const columns = computed(() => {
       },
       sorter: 'default',
 
-      render: (row) => (row.type === 'HEADER' ? row.default_supplier : ''),
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return mrp_settings.doc?.render_supplier_name
+          ? row.default_supplier_name
+          : row.default_supplier
+      },
     },
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
@@ -831,6 +808,7 @@ async function executeAsyncQuery() {
   }
 
   const backendFilters = [['MRP Entry', 'is_header', '=', 1]]
+  const backendOrFilters = []
 
   if (itemCodeFilter) {
     backendFilters.push(['MRP Entry', 'item_code', 'in', itemCodeFilter[1]])
@@ -838,7 +816,22 @@ async function executeAsyncQuery() {
 
   Object.keys(textFilters).forEach((key) => {
     if (textFilters[key]) {
-      backendFilters.push(['MRP Entry', key, 'like', `%${textFilters[key]}%`])
+      if (key === 'default_supplier') {
+        backendOrFilters.push([
+          'MRP Entry',
+          'default_supplier',
+          'like',
+          `%${textFilters[key]}%`,
+        ])
+        backendOrFilters.push([
+          'MRP Entry',
+          'default_supplier_name',
+          'like',
+          `%${textFilters[key]}%`,
+        ])
+      } else {
+        backendFilters.push(['MRP Entry', key, 'like', `%${textFilters[key]}%`])
+      }
     }
   })
 
@@ -855,6 +848,7 @@ async function executeAsyncQuery() {
     const count = await call('frappe.client.get_count', {
       doctype: 'MRP Entry',
       filters: backendFilters,
+      or_filters: backendOrFilters.length > 0 ? backendOrFilters : null,
     })
 
     paginationReactive.itemCount = count
@@ -885,6 +879,7 @@ async function executeAsyncQuery() {
     const items = await call('frappe.client.get_list', {
       doctype: 'MRP Entry',
       filters: backendFilters,
+      or_filters: backendOrFilters.length > 0 ? backendOrFilters : null,
       fields: ['*'],
       limit_start: (paginationReactive.page - 1) * paginationReactive.pageSize,
       limit_page_length: paginationReactive.pageSize,
@@ -1052,11 +1047,6 @@ watch(closed_column_field, (newVal) => {
       })
     }
   })
-})
-
-watch([onlyShowSuggested, itemCodeSearch], () => {
-  paginationReactive.page = 1
-  executeAsyncQuery()
 })
 
 function exportToCsv() {
