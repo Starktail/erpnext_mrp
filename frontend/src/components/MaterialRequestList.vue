@@ -886,12 +886,81 @@ async function executeAsyncQuery() {
       order_by: orderBy,
     })
 
-    treeData.value = items.map((item) => ({
-      ...item,
-      id: item.item_code,
-      type: 'HEADER',
-      isLeaf: false,
-    }))
+    const itemCodes = items.map((item) => item.item_code)
+    let details = []
+    if (itemCodes.length > 0) {
+      details = await call('frappe.client.get_list', {
+        doctype: 'MRP Entry',
+        filters: [['item_code', 'in', itemCodes]],
+        fields: [
+          'item_code',
+          'target_date',
+          'on_hand_inventory_no_action',
+          'on_hand_inventory',
+          'on_hand_inventory_excl_reorder_level',
+          'open_orders',
+          'total_forecast_demand',
+          'scheduled_receipts',
+          'suggested_receipts',
+          'suggested_orders',
+          'suggested_orders_value',
+          'suggested_orders_value_payable',
+          'projected_on_hand_inventory_no_action',
+          'projected_on_hand_inventory',
+          'projected_on_hand_inventory_excl_reorder_level',
+        ],
+        limit_page_length: 0,
+      })
+    }
+
+    const pivotedDataByItem = {}
+    itemCodes.forEach((code) => {
+      pivotedDataByItem[code] = {}
+    })
+
+    const fieldsToPivot = [
+      'on_hand_inventory_no_action',
+      'on_hand_inventory',
+      'on_hand_inventory_excl_reorder_level',
+      'open_orders',
+      'total_forecast_demand',
+      'scheduled_receipts',
+      'suggested_receipts',
+      'suggested_orders',
+      'suggested_orders_value',
+      'suggested_orders_value_payable',
+      'projected_on_hand_inventory_no_action',
+      'projected_on_hand_inventory',
+      'projected_on_hand_inventory_excl_reorder_level',
+    ]
+
+    details.forEach((entry) => {
+      if (!entry.target_date) return
+      const [year, week] = getWeekNumber(new Date(entry.target_date))
+      const weekKey = `${year}-W${String(week).padStart(2, '0')}`
+      if (!pivotedDataByItem[entry.item_code]) {
+        pivotedDataByItem[entry.item_code] = {}
+      }
+      fieldsToPivot.forEach((field) => {
+        pivotedDataByItem[entry.item_code][`${weekKey}_${field}`] = entry[field]
+      })
+    })
+
+    const weeks = getWeekKeys()
+
+    treeData.value = items.map((item) => {
+      const row = {
+        ...item,
+        id: item.item_code,
+        type: 'HEADER',
+        isLeaf: false,
+        _itemPivot: pivotedDataByItem[item.item_code] || {},
+      }
+      weeks.forEach((weekKey) => {
+        row[weekKey] = row._itemPivot[`${weekKey}_${closed_column_field.value}`]
+      })
+      return row
+    })
   } catch (e) {
     console.error(e)
     toast.error('Failed to fetch MRP entries')
@@ -902,70 +971,26 @@ async function executeAsyncQuery() {
 
 function onLoad(row) {
   return new Promise((resolve) => {
-    call('frappe.client.get_list', {
-      doctype: 'MRP Entry',
-      filters: { item_code: row.item_code },
-      fields: ['*'],
-      limit_page_length: 500,
+    const weeks = getWeekKeys()
+    const children = []
+
+    quantityFields.value.forEach((qField) => {
+      const detailRow = {
+        ...row,
+        id: `${row.item_code}_${qField.value}`,
+        type: 'DETAIL',
+        measure_key: qField.value,
+        item_code_display: qField.label,
+        isLeaf: true,
+      }
+      weeks.forEach((weekKey) => {
+        detailRow[weekKey] = row._itemPivot[`${weekKey}_${qField.value}`]
+      })
+      children.push(detailRow)
     })
-      .then((entries) => {
-        const itemPivot = {}
-        const weeks = getWeekKeys()
 
-        entries.forEach((entry) => {
-          const [year, week] = getWeekNumber(new Date(entry.target_date))
-          const weekKey = `${year}-W${String(week).padStart(2, '0')}`
-
-          const fieldsToPivot = [
-            'on_hand_inventory_no_action',
-            'on_hand_inventory',
-            'on_hand_inventory_excl_reorder_level',
-            'open_orders',
-            'total_forecast_demand',
-            'scheduled_receipts',
-            'suggested_receipts',
-            'suggested_orders',
-            'suggested_orders_value',
-            'suggested_orders_value_payable',
-            'projected_on_hand_inventory_no_action',
-            'projected_on_hand_inventory',
-            'projected_on_hand_inventory_excl_reorder_level',
-          ]
-          fieldsToPivot.forEach((field) => {
-            itemPivot[`${weekKey}_${field}`] = entry[field]
-          })
-        })
-
-        weeks.forEach((weekKey) => {
-          row[weekKey] = itemPivot[`${weekKey}_${closed_column_field.value}`]
-        })
-
-        const children = []
-        quantityFields.value.forEach((qField) => {
-          const detailRow = {
-            ...row,
-            id: `${row.item_code}_${qField.value}`,
-            type: 'DETAIL',
-            measure_key: qField.value,
-            item_code_display: qField.label,
-            isLeaf: true,
-          }
-          weeks.forEach((weekKey) => {
-            detailRow[weekKey] = itemPivot[`${weekKey}_${qField.value}`]
-          })
-          children.push(detailRow)
-        })
-
-        row.children = children
-        row._itemPivot = itemPivot
-
-        resolve()
-      })
-      .catch((err) => {
-        console.error(err)
-        toast.error('Failed to load details')
-        resolve()
-      })
+    row.children = children
+    resolve()
   })
 }
 
