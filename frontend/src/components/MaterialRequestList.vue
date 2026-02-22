@@ -50,6 +50,7 @@
         size="small"
         :pagination="paginationReactive"
         :checked-row-keys="selectedRowKeys"
+        :row-class-name="rowClassName"
         @update:checked-row-keys="handleCheck"
         @update:filters="handleFiltersChange"
         @update:sorter="handleSorterChange"
@@ -326,10 +327,10 @@ const quantityFields = computed(() => [
     value: 'projected_on_hand_inventory_no_action',
     label: 'Projected On Hand [Ignore Suggested Orders]',
     formatter: (val) => (val < 0 ? '<0' : formatQuantity(val)),
-    styleFn: (val, data) => {
-      if (val < 0) return { backgroundColor: '#fed7d7' }
-      if (val < data.reorder_level) return { backgroundColor: '#fff2cc' }
-      return {}
+    cellClass: (val, data) => {
+      if (val < 0) return 'shortage'
+      if (val < data.reorder_level) return 'below-safety'
+      return ''
     },
   },
   { value: 'scheduled_receipts', label: 'Scheduled Receipts' },
@@ -347,7 +348,7 @@ const quantityFields = computed(() => [
   {
     value: 'suggested_orders',
     label: 'Suggested Orders',
-    styleFn: (val) => (val > 0 ? { backgroundColor: '#ddeeff' } : {}),
+    cellClass: (val) => (val > 0 ? 'suggested-order' : ''),
   },
   {
     value: 'suggested_orders_value',
@@ -435,11 +436,9 @@ const columns = computed(() => {
       title: 'Item Code / Measure',
       key: 'item_code',
       fixed: 'left',
-      width: 280,
+      width: 400,
       sorter: 'default',
-      ellipsis: {
-        tooltip: true,
-      },
+      className: 'item-code-column',
       render: (row) => {
         if (row.type === 'HEADER') {
           return h(
@@ -603,6 +602,17 @@ const columns = computed(() => {
         tooltip: true,
       },
       align: 'right',
+      className: 'week-column',
+      cellProps: (row) => {
+        const val = row[weekKey]
+        let measure_key =
+          row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
+        const qField = quantityFields.value.find((f) => f.value === measure_key)
+        if (qField && qField.cellClass) {
+          return { class: qField.cellClass(val, row) }
+        }
+        return {}
+      },
       render: (row) => {
         const val = row[weekKey]
         let measure_key =
@@ -624,30 +634,6 @@ const columns = computed(() => {
           formattedVal = ''
         } else if (qField && qField.formatter) {
           formattedVal = qField.formatter(val)
-        }
-
-        let style = {}
-        if (qField && qField.styleFn) {
-          style = qField.styleFn(val, row)
-        }
-
-        if (Object.keys(style).length > 0) {
-          return h(
-            'div',
-            {
-              style: {
-                ...style,
-                height: '100%',
-                width: '100%',
-                margin: '-8px -12px',
-                padding: '8px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-              },
-            },
-            formattedVal,
-          )
         }
 
         return formattedVal
@@ -840,6 +826,12 @@ function onLoad(row) {
 
 function rowKey(rowData) {
   return rowData.id
+}
+
+function rowClassName(row) {
+  if (row.type === 'HEADER') return 'row-header'
+  if (row.type === 'DETAIL') return 'row-detail'
+  return ''
 }
 
 function handleCheck(keys) {
@@ -1059,5 +1051,36 @@ async function confirmCreateMaterialRequest() {
 /* Fix table header height for rotation */
 .n-data-table-thead {
   height: 140px;
+}
+
+/* Fix for Naive UI tree table ellipsis wrapping causing double height and offset */
+.n-data-table-td {
+  white-space: nowrap;
+}
+
+/* Reduce whitespace */
+.n-data-table-td {
+  padding: 4px !important;
+}
+</style>
+
+<style scoped>
+/* Cell Coloring Rules */
+:deep(.suggested-order) {
+  background-color: #ddeeff !important;
+}
+:deep(.shortage) {
+  background-color: #fed7d7 !important;
+}
+:deep(.below-safety) {
+  background-color: #fff2cc !important;
+}
+
+/* Header vs Detail Row Styling */
+:deep(.row-header .item-code-column) {
+  font-weight: 600;
+}
+:deep(.row-detail .item-code-column) {
+  padding-left: 24px !important;
 }
 </style>
