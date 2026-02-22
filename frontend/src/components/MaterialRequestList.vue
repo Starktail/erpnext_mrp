@@ -206,7 +206,23 @@ const textFilters = reactive({
   default_supplier: '',
 })
 
+const appliedTextFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
+})
+
 const numberFilters = reactive({
+  reorder_level: { min: null, max: null },
+  reorder_quantity: { min: null, max: null },
+  lead_time: { min: null, max: null },
+  days_to_reorder: { min: null, max: null },
+  days_to_reorder_excl_reorder_level: { min: null, max: null },
+})
+
+const appliedNumberFilters = reactive({
   reorder_level: { min: null, max: null },
   reorder_quantity: { min: null, max: null },
   lead_time: { min: null, max: null },
@@ -227,6 +243,7 @@ function renderTextFilter(columnKey, placeholder) {
         style: { marginBottom: '8px' },
         onKeyup: (e) => {
           if (e.key === 'Enter') {
+            appliedTextFilters[columnKey] = textFilters[columnKey]
             paginationReactive.page = 1
             executeAsyncQuery()
             hide()
@@ -240,6 +257,8 @@ function renderTextFilter(columnKey, placeholder) {
             size: 'sm',
             onClick: () => {
               textFilters[columnKey] = ''
+              appliedTextFilters[columnKey] = ''
+              paginationReactive.page = 1
               executeAsyncQuery()
               hide()
             },
@@ -252,6 +271,7 @@ function renderTextFilter(columnKey, placeholder) {
             size: 'sm',
             variant: 'solid',
             onClick: () => {
+              appliedTextFilters[columnKey] = textFilters[columnKey]
               paginationReactive.page = 1
               executeAsyncQuery()
               hide()
@@ -295,6 +315,9 @@ function renderNumberFilter(columnKey) {
             onClick: () => {
               numberFilters[columnKey].min = null
               numberFilters[columnKey].max = null
+              appliedNumberFilters[columnKey].min = null
+              appliedNumberFilters[columnKey].max = null
+              paginationReactive.page = 1
               executeAsyncQuery()
               hide()
             },
@@ -307,6 +330,8 @@ function renderNumberFilter(columnKey) {
             size: 'sm',
             variant: 'solid',
             onClick: () => {
+              appliedNumberFilters[columnKey].min = numberFilters[columnKey].min
+              appliedNumberFilters[columnKey].max = numberFilters[columnKey].max
               paginationReactive.page = 1
               executeAsyncQuery()
               hide()
@@ -525,6 +550,7 @@ const columns = computed(() => {
       title: 'Item Code / Measure',
       key: 'item_code',
       filter: true,
+      filterOptionValue: appliedTextFilters.item_code || null,
       renderFilterMenu: renderTextFilter('item_code', 'Search Item Code'),
       fixed: 'left',
       width: 400,
@@ -554,6 +580,7 @@ const columns = computed(() => {
       title: 'Item Name',
       key: 'item_name',
       filter: true,
+      filterOptionValue: appliedTextFilters.item_name || null,
       renderFilterMenu: renderTextFilter('item_name', 'Search Item Name'),
       fixed: 'left',
       width: 200,
@@ -567,6 +594,7 @@ const columns = computed(() => {
       title: 'Item Group',
       key: 'item_group',
       filter: true,
+      filterOptionValue: appliedTextFilters.item_group || null,
       renderFilterMenu: renderTextFilter('item_group', 'Search Item Group'),
       width: 120,
       ellipsis: {
@@ -590,6 +618,7 @@ const columns = computed(() => {
       title: 'BOM',
       key: 'bom_list',
       filter: true,
+      filterOptionValue: appliedTextFilters.bom_list || null,
       renderFilterMenu: renderTextFilter('bom_list', 'Search BOM'),
       width: 150,
       ellipsis: {
@@ -611,6 +640,10 @@ const columns = computed(() => {
       title: 'Safety Stock',
       key: 'reorder_level',
       filter: true,
+      filterOptionValue:
+        appliedNumberFilters.reorder_level.min !== null ||
+        appliedNumberFilters.reorder_level.max !== null ||
+        null,
       renderFilterMenu: renderNumberFilter('reorder_level'),
       width: 100,
       ellipsis: {
@@ -625,6 +658,10 @@ const columns = computed(() => {
       title: 'Re-order Qty',
       key: 'reorder_quantity',
       filter: true,
+      filterOptionValue:
+        appliedNumberFilters.reorder_quantity.min !== null ||
+        appliedNumberFilters.reorder_quantity.max !== null ||
+        null,
       renderFilterMenu: renderNumberFilter('reorder_quantity'),
       width: 100,
       ellipsis: {
@@ -639,6 +676,10 @@ const columns = computed(() => {
       title: `Lead Time (${defaultTimeUnit.value})`,
       key: 'lead_time',
       filter: true,
+      filterOptionValue:
+        appliedNumberFilters.lead_time.min !== null ||
+        appliedNumberFilters.lead_time.max !== null ||
+        null,
       renderFilterMenu: renderNumberFilter('lead_time'),
       width: 100,
       ellipsis: {
@@ -652,6 +693,7 @@ const columns = computed(() => {
       title: 'Supplier',
       key: 'default_supplier',
       filter: true,
+      filterOptionValue: appliedTextFilters.default_supplier || null,
       renderFilterMenu: renderTextFilter('default_supplier', 'Search Supplier'),
       width: 120,
       ellipsis: {
@@ -670,6 +712,10 @@ const columns = computed(() => {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
       filter: true,
+      filterOptionValue:
+        appliedNumberFilters.days_to_reorder.min !== null ||
+        appliedNumberFilters.days_to_reorder.max !== null ||
+        null,
       renderFilterMenu: renderNumberFilter('days_to_reorder'),
       width: 110,
       ellipsis: {
@@ -684,6 +730,10 @@ const columns = computed(() => {
       title: `${defaultTimeUnit.value} to Reorder`,
       key: 'days_to_reorder_excl_reorder_level',
       filter: true,
+      filterOptionValue:
+        appliedNumberFilters.days_to_reorder_excl_reorder_level.min !== null ||
+        appliedNumberFilters.days_to_reorder_excl_reorder_level.max !== null ||
+        null,
       renderFilterMenu: renderNumberFilter(
         'days_to_reorder_excl_reorder_level',
       ),
@@ -814,33 +864,48 @@ async function executeAsyncQuery() {
     backendFilters.push(['MRP Entry', 'item_code', 'in', itemCodeFilter[1]])
   }
 
-  Object.keys(textFilters).forEach((key) => {
-    if (textFilters[key]) {
+  Object.keys(appliedTextFilters).forEach((key) => {
+    if (appliedTextFilters[key]) {
       if (key === 'default_supplier') {
         backendOrFilters.push([
           'MRP Entry',
           'default_supplier',
           'like',
-          `%${textFilters[key]}%`,
+          `%${appliedTextFilters[key]}%`,
         ])
         backendOrFilters.push([
           'MRP Entry',
           'default_supplier_name',
           'like',
-          `%${textFilters[key]}%`,
+          `%${appliedTextFilters[key]}%`,
         ])
       } else {
-        backendFilters.push(['MRP Entry', key, 'like', `%${textFilters[key]}%`])
+        backendFilters.push([
+          'MRP Entry',
+          key,
+          'like',
+          `%${appliedTextFilters[key]}%`,
+        ])
       }
     }
   })
 
-  Object.keys(numberFilters).forEach((key) => {
-    if (numberFilters[key].min !== null) {
-      backendFilters.push(['MRP Entry', key, '>=', numberFilters[key].min])
+  Object.keys(appliedNumberFilters).forEach((key) => {
+    if (appliedNumberFilters[key].min !== null) {
+      backendFilters.push([
+        'MRP Entry',
+        key,
+        '>=',
+        appliedNumberFilters[key].min,
+      ])
     }
-    if (numberFilters[key].max !== null) {
-      backendFilters.push(['MRP Entry', key, '<=', numberFilters[key].max])
+    if (appliedNumberFilters[key].max !== null) {
+      backendFilters.push([
+        'MRP Entry',
+        key,
+        '<=',
+        appliedNumberFilters[key].max,
+      ])
     }
   })
 
@@ -1054,11 +1119,17 @@ function exportToCsv() {
 }
 
 function clearFilters() {
-  Object.keys(textFilters).forEach((k) => (textFilters[k] = ''))
+  Object.keys(textFilters).forEach((k) => {
+    textFilters[k] = ''
+    appliedTextFilters[k] = ''
+  })
   Object.keys(numberFilters).forEach((k) => {
     numberFilters[k].min = null
     numberFilters[k].max = null
+    appliedNumberFilters[k].min = null
+    appliedNumberFilters[k].max = null
   })
+  paginationReactive.page = 1
   executeAsyncQuery()
 }
 
@@ -1245,5 +1316,13 @@ async function confirmCreateMaterialRequest() {
 }
 :deep(.row-detail .item-code-column) {
   padding-left: 24px !important;
+}
+
+/* Active Filter Icon Indication */
+:deep(.n-data-table-filter--active) {
+  color: #18a058 !important; /* Naive UI success color (green) */
+}
+:deep(.n-data-table-filter--active .n-base-icon) {
+  color: #18a058 !important;
 }
 </style>
