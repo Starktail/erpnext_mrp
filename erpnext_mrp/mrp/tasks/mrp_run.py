@@ -14,6 +14,10 @@ from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
 
 
 @frappe.whitelist()
+def trigger_mrp_run():
+	frappe.get_doc("Scheduled Job Type", "mrp_run.mrp_run").enqueue(force=True)
+
+
 def mrp_run(enqueue: bool = True):
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
@@ -106,7 +110,8 @@ def create_mrp_item_entries():
 				WHERE b.item = t_item.name
 				AND b.is_active = 1
 				AND b.is_default = 1
-			)) AS is_manufactured
+			)) AS is_manufactured,
+			0 AS is_header
 		FROM `tabItem` AS t_item
 		LEFT JOIN bom_rollup br ON t_item.name = br.item_code
 		WHERE t_item.disabled = 0
@@ -146,12 +151,23 @@ def create_mrp_item_entries():
 	period_data = list(periods.items())
 
 	# 4. Efficiently combine items and periods and prepare for bulk insert
-	# item is a tuple: (item_code, bom_level, root_bom, is_manufactured)
+	# item is a tuple: (item_code, lead_time, bom_level, root_bom, is_manufactured, is_header)
 	# period is a tuple: (period_str, target_date)
 	owner = frappe.session.user
 	creation = datetime.datetime.now()
 	final_values = [
-		(f"{item[0]}{period[0]}", item[0], item[1], item[2], item[3], item[4], period[1], owner, creation)
+		(
+			f"{item[0]}{period[0]}",
+			item[0],
+			item[1],
+			item[2],
+			item[3],
+			item[4],
+			1 if period[0] == period_data[0][0] else 0,
+			period[1],
+			owner,
+			creation,
+		)
 		for item, period in itertools.product(item_list, period_data)
 	]
 
@@ -170,6 +186,7 @@ def create_mrp_item_entries():
 			"bom_level",
 			"bom_list",
 			"is_manufactured",
+			"is_header",
 			"target_date",
 			"owner",
 			"creation",
@@ -813,7 +830,7 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	item_details_list = frappe.db.sql(item_details_query, as_dict=True)
 
 	# Process items in batches
-	batch_size = 1000
+	batch_size = 500
 	for i in range(0, len(item_details_list), batch_size):
 		batch = item_details_list[i : i + batch_size]
 		if enqueue:
@@ -956,11 +973,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 
 			# Determine if there is a shortage exlcuding safety stock
 			entry.suggested_receipts_excl_reorder_level = 0
-			non_neg_on_hand_inventory_excl_reorder_level = max(
-				entry.on_hand_inventory_excl_reorder_level or 0, 0
-			)
 			shortage_excl_reorder_level = (
-				non_neg_on_hand_inventory_excl_reorder_level - demand + (entry.scheduled_receipts or 0)
+				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
 			)
 			if shortage_excl_reorder_level < 0:
 				shortage_excl_reorder_level *= -1
