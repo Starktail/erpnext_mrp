@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "item_code",
+  "is_header",
   "bom_level",
   "bom_list",
   "target_date",
@@ -316,12 +317,18 @@
   {
    "fieldname": "column_break_mryl",
    "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_header",
+   "fieldtype": "Check",
+   "label": "Is Period 0"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-19 15:09:28.349512",
+ "modified": "2026-02-21 13:57:53.780632",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
