@@ -328,15 +328,14 @@
   {
    "fetch_from": "default_supplier.supplier_name",
    "fieldname": "default_supplier_name",
-   "fieldtype": "Link",
-   "label": "Default Supplier Name",
-   "options": "Supplier"
+   "fieldtype": "Data",
+   "label": "Default Supplier Name"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-22 13:38:51.772685",
+ "modified": "2026-02-23 06:13:50.547789",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
