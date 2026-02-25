@@ -4,7 +4,6 @@
       <div class="flex gap-2 items-center">
         <Button @click="clearFilters">Clear Filters</Button>
         <Button @click="rerunMrp">Rerun MRP Calculations</Button>
-        <Button @click="exportToCsv">Export to CSV</Button>
         <Combobox
           :options="quantityFields"
           v-model="closed_column_field"
@@ -52,8 +51,6 @@
         :pagination="paginationReactive"
         :checked-row-keys="selectedRowKeys"
         :row-class-name="rowClassName"
-        :get-csv-cell="getCsvCell"
-        :get-csv-header="getCsvHeader"
         @update:checked-row-keys="handleCheck"
         @update:filters="handleFiltersChange"
         @update:sorter="handleSorterChange"
@@ -351,9 +348,9 @@ const sorterRef = ref(null)
 
 const paginationReactive = reactive({
   page: 1,
-  pageSize: 10,
+  pageSize: 50,
   showSizePicker: true,
-  pageSizes: [5, 10, 20, 50],
+  pageSizes: [10, 20, 50, 100],
   itemCount: 0,
 })
 
@@ -439,10 +436,10 @@ function formatCurrency(value) {
   return formatCurrencyUtil(value, null, currency, 0)
 }
 
-const quantityFields = computed(() => [
+const ALL_QUANTITY_FIELDS = [
   {
     value: 'projected_on_hand_inventory_no_action',
-    label: 'Projected On Hand [Ignore Suggested Orders]',
+    label: 'Projected On Hand (without Suggested Orders)',
     formatter: (val) => (val < 0 ? '<0' : formatQuantity(val)),
     cellClass: (val, data) => {
       if (val < 0) return 'shortage'
@@ -454,11 +451,11 @@ const quantityFields = computed(() => [
   { value: 'suggested_receipts', label: 'Suggested Receipts' },
   {
     value: 'projected_on_hand_inventory_excl_reorder_level',
-    label: 'Projected On Hand [with Suggested Orders] (excl Safety Stock)',
+    label: 'Projected On Hand (with Suggested Orders, excl Safety Stock)',
   },
   {
     value: 'projected_on_hand_inventory',
-    label: 'Projected On Hand [with Suggested Orders] (incl Safety Stock)',
+    label: 'Projected On Hand (with Suggested Orders, incl Safety Stock)',
   },
   { value: 'open_orders', label: 'Open Sales/Work Orders' },
   { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
@@ -479,17 +476,23 @@ const quantityFields = computed(() => [
   },
   {
     value: 'on_hand_inventory_no_action',
-    label: 'On Hand [Ignore Suggested Orders]',
+    label: 'On Hand (without Suggested Orders)',
   },
   {
     value: 'on_hand_inventory_excl_reorder_level',
-    label: 'On Hand [with Suggested Orders] (excl Safety Stock)',
+    label: 'On Hand (with Suggested Orders, excl Safety Stock)',
   },
   {
     value: 'on_hand_inventory',
-    label: 'On Hand [with Suggested Orders] (incl Safety Stock)',
+    label: 'On Hand (with Suggested Orders, incl Safety Stock)',
   },
-])
+]
+
+const quantityFields = computed(() => {
+  const settings = mrp_settings.doc
+  if (!settings) return ALL_QUANTITY_FIELDS
+  return ALL_QUANTITY_FIELDS.filter((f) => settings[f.value] !== 0)
+})
 
 function getWeekNumber(d) {
   d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
@@ -628,16 +631,6 @@ const columns = computed(() => {
         tooltip: true,
       },
       render: (row) => (row.type === 'HEADER' ? row.bom_list : ''),
-    },
-    {
-      title: 'Lvl',
-      key: 'bom_level',
-      width: 60,
-      ellipsis: {
-        tooltip: true,
-      },
-      sorter: 'default',
-      render: (row) => (row.type === 'HEADER' ? row.bom_level : ''),
     },
     {
       title: 'Safety Stock',
@@ -931,7 +924,6 @@ async function executeAsyncQuery() {
           'item_name',
           'item_group',
           'uom',
-          'bom_level',
           'reorder_level',
           'reorder_quantity',
           'lead_time',
@@ -1117,82 +1109,28 @@ watch(closed_column_field, (newVal) => {
   })
 })
 
-const tableRef = ref(null)
+watch(quantityFields, (newFields) => {
+  const validValues = newFields.map((f) => f.value)
+  if (!validValues.includes(closed_column_field.value)) {
+    closed_column_field.value = validValues.includes('suggested_orders')
+      ? 'suggested_orders'
+      : validValues[0] ?? 'suggested_orders'
+  }
+})
 
-const getCsvHeader = (col) => {
-  if (typeof col.title === 'function') {
-    if (
-      col.key &&
-      typeof col.key === 'string' &&
-      col.key.match(/^\d{4}-W\d{2}$/)
-    ) {
-      return getFormattedWeekHeader(col.key)
+watch(
+  () => mrp_settings.doc,
+  (newSettings, oldSettings) => {
+    if (!oldSettings && newSettings) {
+      treeData.value.forEach((row) => {
+        if (row.children) {
+          delete row.children
+          row.isLeaf = false
+        }
+      })
     }
-    return col.key || 'Unknown'
-  }
-  return col.title || col.key || 'Unknown'
-}
-
-const getCsvCell = (value, row, column) => {
-  if (column.key === 'item_code') {
-    return row.type === 'HEADER' ? row.item_code : row.item_code_display
-  }
-  if (column.key === 'item_name')
-    return row.type === 'HEADER' ? row.item_name : ''
-  if (column.key === 'item_group')
-    return row.type === 'HEADER' ? row.item_group : ''
-  if (column.key === 'uom') return row.type === 'HEADER' ? row.uom : ''
-  if (column.key === 'bom_list')
-    return row.type === 'HEADER' ? row.bom_list : ''
-  if (column.key === 'bom_level')
-    return row.type === 'HEADER' ? row.bom_level : ''
-  if (column.key === 'reorder_level')
-    return row.type === 'HEADER' ? row.reorder_level : ''
-  if (column.key === 'reorder_quantity')
-    return row.type === 'HEADER' ? row.reorder_quantity : ''
-  if (column.key === 'lead_time')
-    return row.type === 'HEADER' ? row.lead_time : ''
-  if (column.key === 'default_supplier') {
-    if (row.type !== 'HEADER') return ''
-    return mrp_settings.doc?.render_supplier_name
-      ? row.default_supplier_name
-      : row.default_supplier
-  }
-  if (column.key === 'days_to_reorder')
-    return row.type === 'HEADER' ? row.days_to_reorder : ''
-  if (column.key === 'days_to_reorder_excl_reorder_level')
-    return row.type === 'HEADER' ? row.days_to_reorder_excl_reorder_level : ''
-
-  if (
-    column.key &&
-    typeof column.key === 'string' &&
-    column.key.match(/^\d{4}-W\d{2}$/)
-  ) {
-    const val = row[column.key]
-    let measure_key =
-      row.type === 'DETAIL' ? row.measure_key : closed_column_field.value
-    if (
-      val === 0 &&
-      ![
-        'on_hand_inventory_no_action',
-        'on_hand_inventory',
-        'on_hand_inventory_excl_reorder_level',
-        'projected_on_hand_inventory_no_action',
-        'projected_on_hand_inventory',
-        'projected_on_hand_inventory_excl_reorder_level',
-      ].includes(measure_key)
-    ) {
-      return ''
-    }
-    return val !== undefined && val !== null ? val : ''
-  }
-
-  return value !== undefined && value !== null ? value : ''
-}
-
-function exportToCsv() {
-  tableRef.value?.downloadCsv({ fileName: 'mrp-export' })
-}
+  },
+)
 
 function clearFilters() {
   Object.keys(textFilters).forEach((k) => {
