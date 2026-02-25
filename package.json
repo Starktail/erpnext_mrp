@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "erpnext_mrp",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": "Starktail (Pty) Ltd <support@starktail.com>",
   "workspaces": [
     "frontend",
