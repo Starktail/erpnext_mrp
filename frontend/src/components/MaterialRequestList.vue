@@ -436,10 +436,10 @@ function formatCurrency(value) {
   return formatCurrencyUtil(value, null, currency, 0)
 }
 
-const quantityFields = computed(() => [
+const ALL_QUANTITY_FIELDS = [
   {
     value: 'projected_on_hand_inventory_no_action',
-    label: 'Projected On Hand [Ignore Suggested Orders]',
+    label: 'Projected On Hand (without Suggested Orders)',
     formatter: (val) => (val < 0 ? '<0' : formatQuantity(val)),
     cellClass: (val, data) => {
       if (val < 0) return 'shortage'
@@ -451,11 +451,11 @@ const quantityFields = computed(() => [
   { value: 'suggested_receipts', label: 'Suggested Receipts' },
   {
     value: 'projected_on_hand_inventory_excl_reorder_level',
-    label: 'Projected On Hand [with Suggested Orders] (excl Safety Stock)',
+    label: 'Projected On Hand (with Suggested Orders, excl Safety Stock)',
   },
   {
     value: 'projected_on_hand_inventory',
-    label: 'Projected On Hand [with Suggested Orders] (incl Safety Stock)',
+    label: 'Projected On Hand (with Suggested Orders, incl Safety Stock)',
   },
   { value: 'open_orders', label: 'Open Sales/Work Orders' },
   { value: 'total_forecast_demand', label: 'Total Forecast Demand' },
@@ -476,17 +476,23 @@ const quantityFields = computed(() => [
   },
   {
     value: 'on_hand_inventory_no_action',
-    label: 'On Hand [Ignore Suggested Orders]',
+    label: 'On Hand (without Suggested Orders)',
   },
   {
     value: 'on_hand_inventory_excl_reorder_level',
-    label: 'On Hand [with Suggested Orders] (excl Safety Stock)',
+    label: 'On Hand (with Suggested Orders, excl Safety Stock)',
   },
   {
     value: 'on_hand_inventory',
-    label: 'On Hand [with Suggested Orders] (incl Safety Stock)',
+    label: 'On Hand (with Suggested Orders, incl Safety Stock)',
   },
-])
+]
+
+const quantityFields = computed(() => {
+  const settings = mrp_settings.doc
+  if (!settings) return ALL_QUANTITY_FIELDS
+  return ALL_QUANTITY_FIELDS.filter((f) => settings[f.value] !== 0)
+})
 
 function getWeekNumber(d) {
   d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
@@ -1113,6 +1119,29 @@ watch(closed_column_field, (newVal) => {
     }
   })
 })
+
+watch(quantityFields, (newFields) => {
+  const validValues = newFields.map((f) => f.value)
+  if (!validValues.includes(closed_column_field.value)) {
+    closed_column_field.value = validValues.includes('suggested_orders')
+      ? 'suggested_orders'
+      : validValues[0] ?? 'suggested_orders'
+  }
+})
+
+watch(
+  () => mrp_settings.doc,
+  (newSettings, oldSettings) => {
+    if (!oldSettings && newSettings) {
+      treeData.value.forEach((row) => {
+        if (row.children) {
+          delete row.children
+          row.isLeaf = false
+        }
+      })
+    }
+  },
+)
 
 function clearFilters() {
   Object.keys(textFilters).forEach((k) => {

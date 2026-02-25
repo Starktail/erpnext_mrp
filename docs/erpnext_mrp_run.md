@@ -14,6 +14,33 @@ The `MRP Settings` doctype allows you to configure various parameters for the MR
 -   **Custom Re-order Qty Item Field**: Here you can select another `Item` DocField to be used as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field.
 -   **Assume Remaining Quantity**: When calculating scheduled receipts from open Purchase Orders, this setting determines whether to include partially received order items. If enabled, the remaining unreceived quantity is considered as expected supply. If disabled, partially received items are ignored.
 
+#### Variables/Measures Display Settings
+
+The **Variables/Measures Display Settings** tab controls which planning metrics are visible as detail rows when you expand an item in the MRP Workbench. Each of the 13 available measures has a checkbox. Unchecking a measure hides its detail row from the workbench and removes it from the "Select a field" dropdown.
+
+The following measures are **enabled by default**:
+
+| Measure | Description |
+| --- | --- |
+| Projected On Hand (without Suggested Orders) | Projected inventory assuming no new orders are placed |
+| Scheduled Receipts | Supply already confirmed via open Work Orders and Purchase Orders |
+| Suggested Receipts | Quantity the MRP suggests should be received in each period |
+| Projected On Hand (with Suggested Orders, excl Safety Stock) | Projected inventory including suggested orders, before safety stock buffer |
+| Projected On Hand (with Suggested Orders, incl Safety Stock) | Projected inventory including suggested orders and safety stock |
+| Open Sales/Work Orders | Firm demand from open Sales Orders and Work Orders |
+| Total Forecast Demand | Demand from forecasts, including BOM-exploded upstream demand |
+| Suggested Orders | Quantity to order, offset by lead time — the primary action field |
+| Suggested Orders Value | Estimated cost of suggested orders |
+| Suggested Orders Payable | Projected cash outflow based on supplier payment terms |
+
+The following measures are **disabled by default** (enable them for additional detail):
+
+| Measure | Description |
+| --- | --- |
+| On Hand (without Suggested Orders) | Beginning-of-period stock, assuming no suggested orders |
+| On Hand (with Suggested Orders, excl Safety Stock) | Beginning-of-period stock including the effect of suggested orders, excluding safety stock |
+| On Hand (with Suggested Orders, incl Safety Stock) | Beginning-of-period stock including the effect of suggested orders and safety stock |
+
 The calculation is executed in several distinct stages:
 
 ### 2. Item and Period Scaffolding
