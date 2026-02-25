@@ -633,16 +633,6 @@ const columns = computed(() => {
       render: (row) => (row.type === 'HEADER' ? row.bom_list : ''),
     },
     {
-      title: 'Lvl',
-      key: 'bom_level',
-      width: 60,
-      ellipsis: {
-        tooltip: true,
-      },
-      sorter: 'default',
-      render: (row) => (row.type === 'HEADER' ? row.bom_level : ''),
-    },
-    {
       title: 'Safety Stock',
       key: 'reorder_level',
       filter: true,
@@ -934,7 +924,6 @@ async function executeAsyncQuery() {
           'item_name',
           'item_group',
           'uom',
-          'bom_level',
           'reorder_level',
           'reorder_quantity',
           'lead_time',
