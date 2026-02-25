@@ -348,9 +348,9 @@ const sorterRef = ref(null)
 
 const paginationReactive = reactive({
   page: 1,
-  pageSize: 10,
+  pageSize: 50,
   showSizePicker: true,
-  pageSizes: [5, 10, 20, 50],
+  pageSizes: [10, 20, 50, 100],
   itemCount: 0,
 })
 
