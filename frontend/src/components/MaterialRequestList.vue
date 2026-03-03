@@ -659,7 +659,7 @@ const columns = computed(() => {
         appliedNumberFilters.reorder_quantity.max !== null ||
         null,
       renderFilterMenu: renderNumberFilter('reorder_quantity'),
-      width: 100,
+      width: 110,
       ellipsis: {
         tooltip: true,
       },
@@ -677,7 +677,7 @@ const columns = computed(() => {
         appliedNumberFilters.lead_time.max !== null ||
         null,
       renderFilterMenu: renderNumberFilter('lead_time'),
-      width: 100,
+      width: 110,
       ellipsis: {
         tooltip: true,
       },
@@ -713,7 +713,7 @@ const columns = computed(() => {
         appliedNumberFilters.days_to_reorder.max !== null ||
         null,
       renderFilterMenu: renderNumberFilter('days_to_reorder'),
-      width: 110,
+      width: 120,
       ellipsis: {
         tooltip: true,
       },
@@ -733,7 +733,7 @@ const columns = computed(() => {
       renderFilterMenu: renderNumberFilter(
         'days_to_reorder_excl_reorder_level',
       ),
-      width: 110,
+      width: 120,
       ellipsis: {
         tooltip: true,
       },
@@ -1330,6 +1330,60 @@ async function confirmCreateMaterialRequest() {
 }
 :deep(.row-detail .item-code-column) {
   padding-left: 24px !important;
+}
+
+/* Label at top, icons at bottom for sortable/filterable headers */
+:deep(.n-data-table-th--filterable),
+:deep(.n-data-table-th--sortable) {
+  padding-top: 6px !important;
+  padding-bottom: 28px !important;
+  align-items: flex-start !important;
+}
+
+/* Non-fixed columns need position:relative as the containing block for absolute icons.
+   Fixed columns already have position:sticky (set by Naive UI) which serves the same
+   purpose — overriding it with relative breaks their horizontal alignment. */
+:deep(.n-data-table-th--filterable:not(.n-data-table-th--fixed-left):not(.n-data-table-th--fixed-right)),
+:deep(.n-data-table-th--sortable:not(.n-data-table-th--fixed-left):not(.n-data-table-th--fixed-right)) {
+  position: relative !important;
+}
+
+:deep(.n-data-table-th--filterable .n-data-table-th__title-wrapper),
+:deep(.n-data-table-th--sortable .n-data-table-th__title-wrapper) {
+  width: 100% !important;
+  overflow: visible !important;
+}
+
+:deep(.n-data-table-th--filterable .n-data-table-th__title),
+:deep(.n-data-table-th--sortable .n-data-table-th__title) {
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
+/* Override Naive UI's inline style="text-overflow: ellipsis" on the header span */
+:deep(.n-data-table-th--filterable .n-ellipsis),
+:deep(.n-data-table-th--sortable .n-ellipsis) {
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: unset !important;
+}
+
+/* Sorter icon pinned to bottom-right (shift left when filter also present) */
+:deep(.n-data-table-th--sortable .n-data-table-sorter) {
+  position: absolute !important;
+  bottom: 4px !important;
+  right: 4px !important;
+}
+
+:deep(.n-data-table-th--sortable.n-data-table-th--filterable .n-data-table-sorter) {
+  right: 24px !important;
+}
+
+/* Filter icon pinned to bottom-right */
+:deep(.n-data-table-th--filterable .n-data-table-filter) {
+  position: absolute !important;
+  bottom: 4px !important;
+  right: 4px !important;
 }
 
 /* Active Filter Icon Indication */
