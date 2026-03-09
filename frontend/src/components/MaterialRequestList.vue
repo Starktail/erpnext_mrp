@@ -1343,8 +1343,16 @@ async function confirmCreateMaterialRequest() {
 /* Non-fixed columns need position:relative as the containing block for absolute icons.
    Fixed columns already have position:sticky (set by Naive UI) which serves the same
    purpose — overriding it with relative breaks their horizontal alignment. */
-:deep(.n-data-table-th--filterable:not(.n-data-table-th--fixed-left):not(.n-data-table-th--fixed-right)),
-:deep(.n-data-table-th--sortable:not(.n-data-table-th--fixed-left):not(.n-data-table-th--fixed-right)) {
+:deep(
+    .n-data-table-th--filterable:not(.n-data-table-th--fixed-left):not(
+        .n-data-table-th--fixed-right
+      )
+  ),
+:deep(
+    .n-data-table-th--sortable:not(.n-data-table-th--fixed-left):not(
+        .n-data-table-th--fixed-right
+      )
+  ) {
   position: relative !important;
 }
 
@@ -1375,7 +1383,9 @@ async function confirmCreateMaterialRequest() {
   right: 4px !important;
 }
 
-:deep(.n-data-table-th--sortable.n-data-table-th--filterable .n-data-table-sorter) {
+:deep(
+    .n-data-table-th--sortable.n-data-table-th--filterable .n-data-table-sorter
+  ) {
   right: 24px !important;
 }
 
@@ -1392,5 +1402,10 @@ async function confirmCreateMaterialRequest() {
 }
 :deep(.n-data-table-filter--active .n-base-icon) {
   color: #18a058 !important;
+}
+
+/* Table header should also be greyed out behind dialog modals */
+:deep(.n-data-table .n-data-table-base-table-header) {
+  z-index: 0;
 }
 </style>
