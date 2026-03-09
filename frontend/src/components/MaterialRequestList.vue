@@ -9,10 +9,6 @@
           v-model="closed_column_field"
           placeholder="Select a field"
         />
-        <Checkbox
-          v-model="onlyShowSuggested"
-          label="Only show items with suggested orders"
-        ></Checkbox>
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
@@ -196,7 +192,6 @@ const selectedItemsSummary = ref([])
 const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
-const onlyShowSuggested = ref(false)
 
 const textFilters = reactive({
   item_code: '',
@@ -828,31 +823,6 @@ async function executeAsyncQuery() {
   loadingRef.value = true
 
   let itemCodeFilter = null
-  if (onlyShowSuggested.value) {
-    try {
-      const suggestedEntries = await call('frappe.client.get_list', {
-        doctype: 'MRP Entry',
-        filters: { suggested_orders: ['>', 0] },
-        fields: ['item_code'],
-        distinct: 1,
-        limit_page_length: 0,
-      })
-      const suggestedItemCodes = suggestedEntries.map((e) => e.item_code)
-      if (suggestedItemCodes.length === 0) {
-        treeData.value = []
-        paginationReactive.itemCount = 0
-        loadingRef.value = false
-        return
-      }
-      itemCodeFilter = ['in', suggestedItemCodes]
-    } catch (e) {
-      console.error(e)
-      toast.error('Failed to filter suggested orders')
-      loadingRef.value = false
-      return
-    }
-  }
-
   const backendFilters = [['MRP Entry', 'is_header', '=', 1]]
   const backendOrFilters = []
 

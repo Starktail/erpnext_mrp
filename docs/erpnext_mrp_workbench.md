@@ -20,7 +20,6 @@ The workbench includes several features to help you analyze and manage your mate
 -   **Clear Filters**: Action to reset the grid's filters.
 -   **Rerun MRP Calculations**: This action triggers a background job to recalculate the entire material requirements plan. A dialog will appear to confirm that the process has started and will provide a link to monitor the background job's progress. Once the calculation is complete, you can reload the page to see the updated plan.
 -   **Export to CSV**: Export the current view of the MRP grid to a CSV file for offline analysis or reporting.
--   **Only show items with suggested orders**: A checkbox that filters the grid to display only those items that have a `Suggested Order` quantity greater than zero in at least one of the weekly time buckets.
 - **Column Field Selector**: A dropdown menu at the top allows you to choose which data field is displayed in the weekly columns for the primary item rows. This is useful for quickly scanning key metrics like `Suggested Orders`, `Projected On Hand Inventory`, or `Suggested Orders Value Payable` across the timeline without needing to expand the rows.
 -   **Visual Cues**: The grid uses color coding to draw attention to important items:
     -   <span style="background-color: #ffdddd;">Red Highlight</span>: Indicates a **P1 - Critical** urgent item. This means the item is required and there is not enough quantity on order.
