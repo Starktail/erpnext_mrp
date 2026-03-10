@@ -91,6 +91,53 @@
         <Button @click="showRerunDialog = false">Close</Button>
       </template>
     </Dialog>
+    <Dialog v-model="showForecastWarning" @hide="showForecastWarning = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">
+          Insufficient Forecast Data
+        </h3>
+      </template>
+      <template #body-content>
+        <div class="space-y-3">
+          <p>
+            Your MRP look-ahead window is
+            <strong>{{ forecastWarningData.look_ahead_weeks }} weeks</strong>
+            (until
+            <strong>{{ forecastWarningData.look_ahead_end_date }}</strong
+            >), but forecast data only extends to
+            <strong>{{
+              forecastWarningData.max_forecast_date ?? 'no forecasts found'
+            }}</strong
+            >.
+          </p>
+          <p>
+            The last
+            <strong
+              >{{ forecastWarningData.weeks_short }} week{{
+                forecastWarningData.weeks_short !== 1 ? 's' : ''
+              }}</strong
+            >
+            of the planning horizon have no forecast demand. Suggested orders
+            and projected stock for those weeks may be understated.
+          </p>
+          <p>
+            To resolve this, extend your
+            <a
+              href="/app/mrp-forecast"
+              target="_blank"
+              class="text-blue-600 hover:underline"
+              >MRP Forecast</a
+            >
+            records to cover at least
+            <strong>{{ forecastWarningData.look_ahead_end_date }}</strong
+            >.
+          </p>
+        </div>
+      </template>
+      <template #actions>
+        <Button @click="showForecastWarning = false">Dismiss</Button>
+      </template>
+    </Dialog>
     <Dialog v-model="showDialog" @hide="showDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">
@@ -192,6 +239,13 @@ const selectedItemsSummary = ref([])
 const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
+const showForecastWarning = ref(false)
+const forecastWarningData = reactive({
+  weeks_short: 0,
+  max_forecast_date: null,
+  look_ahead_end_date: null,
+  look_ahead_weeks: 0,
+})
 
 const textFilters = reactive({
   item_code: '',
@@ -355,6 +409,7 @@ const loadingRef = ref(true)
 
 onMounted(async () => {
   executeAsyncQuery()
+  checkForecastCoverage()
 })
 
 const mrp_settings = createDocumentResource({
@@ -1122,6 +1177,23 @@ function rerunMrp() {
     toast.success('MRP Calculation Started')
     showRerunDialog.value = true
   })
+}
+
+async function checkForecastCoverage() {
+  try {
+    const status = await call(
+      'erpnext_mrp.mrp.tasks.mrp_run.get_forecast_coverage_status',
+    )
+    if (!status.covered) {
+      forecastWarningData.weeks_short = status.weeks_short
+      forecastWarningData.max_forecast_date = status.max_forecast_date
+      forecastWarningData.look_ahead_end_date = status.look_ahead_end_date
+      forecastWarningData.look_ahead_weeks = status.look_ahead_weeks
+      showForecastWarning.value = true
+    }
+  } catch (e) {
+    console.warn('Forecast coverage check failed:', e)
+  }
 }
 
 function handleOpenDialog() {

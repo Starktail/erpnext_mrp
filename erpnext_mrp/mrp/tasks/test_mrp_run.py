@@ -9,7 +9,11 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
 
-from erpnext_mrp.mrp.tasks.mrp_run import create_mrp_item_entries, process_mrp_item_entries
+from erpnext_mrp.mrp.tasks.mrp_run import (
+	create_mrp_item_entries,
+	get_forecast_coverage_status,
+	process_mrp_item_entries,
+)
 
 test_data_file_items = os.path.join(
 	os.path.dirname(__file__), "..", "..", "tests", "test_mrp_data_items.json"
@@ -1393,3 +1397,78 @@ def create_payment_terms_templates():
 				],
 			}
 		).insert()
+
+
+@patch("erpnext_mrp.mrp.tasks.mrp_run.date")
+class TestGetForecastCoverageStatus(FrappeTestCase):
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("MRP Forecast")
+
+		if not frappe.db.exists("MRP Settings", "MRP Settings"):
+			mrp_settings = frappe.new_doc("MRP Settings")
+		else:
+			mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.look_ahead = 6
+		mrp_settings.requirement_based_on = "Open Orders + Forecast"
+		mrp_settings.save()
+
+	def tearDown(self):
+		frappe.db.delete("MRP Forecast")
+		super().tearDown()
+
+	def test_no_forecasts_returns_uncovered(self, mock_date):
+		mock_date.today.return_value = datetime.date(2025, 11, 4)
+
+		result = get_forecast_coverage_status()
+
+		self.assertFalse(result["covered"])
+		self.assertIsNone(result["max_forecast_date"])
+		self.assertEqual(result["weeks_short"], 6)
+
+	def test_forecast_fully_covers_horizon(self, mock_date):
+		today = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = today
+
+		frappe.get_doc(
+			{
+				"doctype": "MRP Forecast",
+				"forecast_date": add_days(today, 6 * 7),
+				"forecast_quantity": 10,
+			}
+		).insert(ignore_permissions=True, ignore_links=True, ignore_mandatory=True)
+
+		result = get_forecast_coverage_status()
+
+		self.assertTrue(result["covered"])
+		self.assertEqual(result["weeks_short"], 0)
+
+	def test_forecast_partially_covers_horizon(self, mock_date):
+		today = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = today
+
+		frappe.get_doc(
+			{
+				"doctype": "MRP Forecast",
+				"forecast_date": add_days(today, 3 * 7),
+				"forecast_quantity": 10,
+			}
+		).insert(ignore_permissions=True, ignore_links=True, ignore_mandatory=True)
+
+		result = get_forecast_coverage_status()
+
+		self.assertFalse(result["covered"])
+		self.assertGreater(result["weeks_short"], 0)
+		self.assertLessEqual(result["weeks_short"], 3)
+
+	def test_open_orders_only_skips_check(self, mock_date):
+		mock_date.today.return_value = datetime.date(2025, 11, 4)
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.requirement_based_on = "Open Orders only"
+		mrp_settings.save()
+
+		result = get_forecast_coverage_status()
+
+		self.assertTrue(result["covered"])
+		self.assertEqual(result["weeks_short"], 0)

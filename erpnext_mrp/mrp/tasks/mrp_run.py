@@ -18,6 +18,52 @@ def trigger_mrp_run():
 	frappe.get_doc("Scheduled Job Type", "mrp_run.mrp_run").enqueue(force=True)
 
 
+@frappe.whitelist()
+def get_forecast_coverage_status() -> dict:
+	settings = frappe.get_cached_doc("MRP Settings")
+	look_ahead: int = settings.look_ahead or 6
+	requirement_based_on: str = settings.requirement_based_on or "Forecast only"
+
+	if requirement_based_on == "Open Orders only":
+		return {
+			"covered": True,
+			"requirement_based_on": requirement_based_on,
+			"look_ahead_weeks": look_ahead,
+			"look_ahead_end_date": None,
+			"max_forecast_date": None,
+			"weeks_short": 0,
+		}
+
+	today = date.today()
+	look_ahead_end_date = today + datetime.timedelta(weeks=look_ahead)
+
+	row = frappe.db.sql(
+		"SELECT MAX(forecast_date) AS max_date FROM `tabMRP Forecast`",
+		as_dict=True,
+	)
+	max_forecast_date = row[0].get("max_date") if row else None
+
+	if max_forecast_date is None:
+		weeks_short = look_ahead
+		covered = False
+	elif getdate(max_forecast_date) >= getdate(look_ahead_end_date):
+		weeks_short = 0
+		covered = True
+	else:
+		gap_days = (getdate(look_ahead_end_date) - getdate(max_forecast_date)).days
+		weeks_short = math.ceil(gap_days / 7)
+		covered = False
+
+	return {
+		"covered": covered,
+		"requirement_based_on": requirement_based_on,
+		"look_ahead_weeks": look_ahead,
+		"look_ahead_end_date": str(look_ahead_end_date),
+		"max_forecast_date": str(max_forecast_date) if max_forecast_date else None,
+		"weeks_short": weeks_short,
+	}
+
+
 def mrp_run(enqueue: bool = True):
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
