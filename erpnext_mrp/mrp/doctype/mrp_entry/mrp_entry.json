@@ -47,13 +47,19 @@
   "section_break_dfyi",
   "suggested_orders_value",
   "suggested_orders_value_payable",
+  "column_break_iniy",
+  "scheduled_receipts_value",
+  "scheduled_receipts_value_payable",
+  "total_payable",
   "section_break_gruc",
   "projected_on_hand_inventory_no_action",
   "column_break_mryl",
   "projected_on_hand_inventory",
+  "needs_reorder",
   "days_to_reorder",
   "column_break_zpfl",
   "projected_on_hand_inventory_excl_reorder_level",
+  "needs_reorder_excl_reorder_level",
   "days_to_reorder_excl_reorder_level"
  ],
  "fields": [
@@ -330,12 +336,46 @@
    "fieldname": "default_supplier_name",
    "fieldtype": "Data",
    "label": "Default Supplier Name"
+  },
+  {
+   "default": "0",
+   "fieldname": "needs_reorder",
+   "fieldtype": "Check",
+   "label": "Needs Reorder (Incl Safety Stock)"
+  },
+  {
+   "default": "0",
+   "fieldname": "needs_reorder_excl_reorder_level",
+   "fieldtype": "Check",
+   "label": "Needs Reorder (Excl Safety Stock)"
+  },
+  {
+   "fieldname": "column_break_iniy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Currency Value of Scheduled Orders",
+   "fieldname": "scheduled_receipts_value",
+   "fieldtype": "Currency",
+   "label": "Scheduled Orders Value"
+  },
+  {
+   "description": "Time-adjusted 'Scheduled Orders Value Payable' (Takes payment terms into account)",
+   "fieldname": "scheduled_receipts_value_payable",
+   "fieldtype": "Currency",
+   "label": "Scheduled Orders Value Payable"
+  },
+  {
+   "description": "<code>Suggested Orders Value Payable</code> + <code>Scheduled Orders Value Payable</code>",
+   "fieldname": "total_payable",
+   "fieldtype": "Currency",
+   "label": "Total Orders Value Payable"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-23 06:13:50.547789",
+ "modified": "2026-03-13 12:27:13.331477",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

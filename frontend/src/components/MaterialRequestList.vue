@@ -525,6 +525,21 @@ const ALL_QUANTITY_FIELDS = [
     formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
   },
   {
+    value: 'scheduled_receipts_value',
+    label: 'Scheduled Orders Value',
+    formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
+  },
+  {
+    value: 'scheduled_receipts_value_payable',
+    label: 'Scheduled Orders Payable',
+    formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
+  },
+  {
+    value: 'total_payable',
+    label: 'Total Orders Payable',
+    formatter: (val) => (val > 0 ? formatCurrency(val) : ''),
+  },
+  {
     value: 'on_hand_inventory_no_action',
     label: 'On Hand (without Suggested Orders)',
   },
@@ -769,8 +784,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
-      render: (row) =>
-        row.type === 'HEADER' ? formatTime(row.days_to_reorder) : '',
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return row.needs_reorder ? formatTime(row.days_to_reorder) : '—'
+      },
     },
     {
       title: `${defaultTimeUnit.value} to Reorder`,
@@ -789,10 +806,12 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
-      render: (row) =>
-        row.type === 'HEADER'
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return row.needs_reorder_excl_reorder_level
           ? formatTime(row.days_to_reorder_excl_reorder_level)
-          : '',
+          : '—'
+      },
     },
   ]
 
@@ -930,6 +949,24 @@ async function executeAsyncQuery() {
     }
   })
 
+  if (
+    appliedNumberFilters.days_to_reorder.min !== null ||
+    appliedNumberFilters.days_to_reorder.max !== null
+  ) {
+    backendFilters.push(['MRP Entry', 'needs_reorder', '=', 1])
+  }
+  if (
+    appliedNumberFilters.days_to_reorder_excl_reorder_level.min !== null ||
+    appliedNumberFilters.days_to_reorder_excl_reorder_level.max !== null
+  ) {
+    backendFilters.push([
+      'MRP Entry',
+      'needs_reorder_excl_reorder_level',
+      '=',
+      1,
+    ])
+  }
+
   try {
     const count = await call('frappe.client.get_count', {
       doctype: 'MRP Entry',
@@ -990,6 +1027,9 @@ async function executeAsyncQuery() {
           'suggested_orders',
           'suggested_orders_value',
           'suggested_orders_value_payable',
+          'scheduled_receipts_value',
+          'scheduled_receipts_value_payable',
+          'total_payable',
           'projected_on_hand_inventory_no_action',
           'projected_on_hand_inventory',
           'projected_on_hand_inventory_excl_reorder_level',
@@ -1014,6 +1054,9 @@ async function executeAsyncQuery() {
       'suggested_orders',
       'suggested_orders_value',
       'suggested_orders_value_payable',
+      'scheduled_receipts_value',
+      'scheduled_receipts_value_payable',
+      'total_payable',
       'projected_on_hand_inventory_no_action',
       'projected_on_hand_inventory',
       'projected_on_hand_inventory_excl_reorder_level',

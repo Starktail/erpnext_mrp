@@ -3,6 +3,8 @@ import itertools
 import math
 from datetime import date
 
+_NO_REORDER_SENTINEL = 9999
+
 import frappe
 from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
@@ -772,7 +774,8 @@ def _update_ordered_qty():
                 WHEN {receiving_date_expression} < %(start_date)s THEN DATE_FORMAT(%(start_date)s, '%%xCW%%v')
                 ELSE DATE_FORMAT({receiving_date_expression}, '%%xCW%%v')
             END AS calendar_week,
-            SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty
+            SUM((po_item.qty - po_item.received_qty) * po_item.conversion_factor) AS total_ordered_qty,
+            SUM((po_item.qty - po_item.received_qty) * po_item.base_rate) AS total_ordered_value
         FROM `tabPurchase Order Item` AS po_item
         JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
         WHERE
@@ -793,27 +796,30 @@ def _update_ordered_qty():
 	if not ordered_data:
 		return
 
-	update_cases = []
-	mrp_entry_names = []
+	qty_cases: list[str] = []
+	value_cases: list[str] = []
+	mrp_entry_names: list[str] = []
 	for row in ordered_data:
 		mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
-		mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
-		update_cases.append(
-			f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(ordered_qty, 0) + {row.total_ordered_qty}"
+		escaped = frappe.db.escape(mrp_entry_name)
+		mrp_entry_names.append(escaped)
+		qty_cases.append(f"WHEN name = {escaped} THEN COALESCE(ordered_qty, 0) + {row.total_ordered_qty}")
+		value_cases.append(
+			f"WHEN name = {escaped} THEN COALESCE(scheduled_receipts_value, 0) + {row.total_ordered_value}"
 		)
 
 	if not mrp_entry_names:
 		return
 
-	case_str = " ".join(update_cases)
+	qty_case_str = " ".join(qty_cases)
+	value_case_str = " ".join(value_cases)
 	names_str = ", ".join(mrp_entry_names)
 
 	update_query = f"""# nosemgrep: frappe-sql-format-injection
         UPDATE `tabMRP Entry`
-        SET ordered_qty = CASE
-            {case_str}
-            ELSE ordered_qty
-        END
+        SET
+            ordered_qty = CASE {qty_case_str} ELSE ordered_qty END,
+            scheduled_receipts_value = CASE {value_case_str} ELSE scheduled_receipts_value END
         WHERE name IN ({names_str});
     """
 	frappe.db.sql(update_query)
@@ -1068,32 +1074,28 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 		# 1. Standard (with reorder level)
 		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
 		if first_shortage_entry:
-			# When do we need it?
 			needed_date = getdate(first_shortage_entry.target_date)
-			# When should we have ordered it?
 			lead_time = first_shortage_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
-
-			# Days from today (negative means late)
 			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
+			mrp_entry_docs[0].needs_reorder = 1
 		else:
-			mrp_entry_docs[0].days_to_reorder = None
+			mrp_entry_docs[0].days_to_reorder = _NO_REORDER_SENTINEL
+			mrp_entry_docs[0].needs_reorder = 0
 
 		# 2. Excl Reorder Level
 		first_shortage_excl_entry = next(
 			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
 		)
 		if first_shortage_excl_entry:
-			# When do we need it?
 			needed_date = getdate(first_shortage_excl_entry.target_date)
-			# When should we have ordered it?
 			lead_time = first_shortage_excl_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
-
-			# Days from today (negative means late)
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days
+			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 1
 		else:
-			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = None
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = _NO_REORDER_SENTINEL
+			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 0
 
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:
@@ -1165,6 +1167,74 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			# If there are no default supplier or no terms, default to same period payable
 			for entry in mrp_entry_docs:
 				entry.suggested_orders_value_payable = entry.suggested_orders_value
+
+		# Calculate Scheduled Receipts Payable (open PO value distributed by payment terms).
+		# For open POs, entry.target_date is the RECEIPT/ARRIVAL date (not the order date).
+		# Base dates are therefore worked backwards from arrival:
+		#   - "Arrival date"  → entry.target_date (it already is the arrival date)
+		#   - "Shipment date" → entry.target_date - additional_lead_time (transit time)
+		#   - "Order date"    → entry.target_date as approximation (actual PO transaction_date
+		#                        not available here; caller can use PO data for precision)
+		if supplier_name and payment_terms_template:
+			entry_map = {e.name: e for e in mrp_entry_docs}
+			for entry in mrp_entry_docs:
+				if entry.scheduled_receipts_value:
+					schedule = get_payment_terms(
+						payment_terms_template,
+						posting_date=entry.target_date,
+						grand_total=entry.scheduled_receipts_value,
+						base_grand_total=entry.scheduled_receipts_value,
+					)
+					if schedule:
+						for term in schedule:
+							base_date = None
+							payment_term_name = term.get("payment_term")
+							if payment_term_name:
+								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
+									"custom_due_date"
+								)
+
+								if custom_due_date_type == "Order date":
+									# Approximation: use arrival date since actual PO order
+									# date is not available in this context.
+									base_date = entry.target_date
+								elif custom_due_date_type == "Shipment date":
+									# Arrival date minus transit (additional_lead_time)
+									base_date = add_days(
+										entry.target_date,
+										-(item_details.get("additional_lead_time") or 0),
+									)
+								elif custom_due_date_type == "Arrival date":
+									# entry.target_date is already the arrival date
+									base_date = entry.target_date
+								else:
+									base_date = entry.target_date
+
+							if base_date:
+								term.due_date = get_due_date(term, posting_date=base_date)
+
+							due_date = term.get("due_date")
+							payment_amount = term.get("payment_amount")
+							if due_date and payment_amount:
+								year, week, _day = getdate(due_date).isocalendar()
+								target_name = f"{item_code}-{year}CW{week:02d}"
+								target_entry = entry_map.get(target_name)
+								if target_entry:
+									target_entry.scheduled_receipts_value_payable = (
+										target_entry.scheduled_receipts_value_payable or 0
+									) + payment_amount
+								elif getdate(due_date) < mrp_entry_docs[0].target_date:
+									mrp_entry_docs[0].scheduled_receipts_value_payable = (
+										mrp_entry_docs[0].scheduled_receipts_value_payable or 0
+									) + payment_amount
+		else:
+			for entry in mrp_entry_docs:
+				entry.scheduled_receipts_value_payable = entry.scheduled_receipts_value
+
+		for entry in mrp_entry_docs:
+			entry.total_payable = (entry.suggested_orders_value_payable or 0) + (
+				entry.scheduled_receipts_value_payable or 0
+			)
 
 		for entry in mrp_entry_docs:
 			entry.save()

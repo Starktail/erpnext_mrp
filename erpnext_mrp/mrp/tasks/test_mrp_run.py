@@ -10,6 +10,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
 
 from erpnext_mrp.mrp.tasks.mrp_run import (
+	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
 	get_forecast_coverage_status,
 	process_mrp_item_entries,
@@ -1091,10 +1092,11 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entries = frappe.get_all(
 			"MRP Entry",
 			filters={"item_code": "TEST-DTR-01"},
-			fields=["days_to_reorder", "target_date"],
+			fields=["days_to_reorder", "needs_reorder", "target_date"],
 			order_by="target_date asc",
 		)
 		self.assertEqual(mrp_entries[0].days_to_reorder, 11)
+		self.assertEqual(mrp_entries[0].needs_reorder, 1)
 
 		# 2. Test Late Order (Negative days_to_reorder)
 		# Create Item with 10 days lead time
@@ -1115,10 +1117,193 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entries_2 = frappe.get_all(
 			"MRP Entry",
 			filters={"item_code": "TEST-DTR-02"},
-			fields=["days_to_reorder", "target_date"],
+			fields=["days_to_reorder", "needs_reorder", "target_date"],
 			order_by="target_date asc",
 		)
 		self.assertEqual(mrp_entries_2[0].days_to_reorder, -10)
+		self.assertEqual(mrp_entries_2[0].needs_reorder, 1)
+
+	def test_days_to_reorder_null_when_fully_covered(self, mock_date):
+		"""
+		When scheduled_receipts cover all demand for the MRP horizon,
+		suggested_receipts = 0 for all periods. needs_reorder must be 0
+		and days_to_reorder must be the sentinel value, not a real value.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-DTR-COVERED", "DTR Covered Item", "Raw Material", lead_time_days=10)
+
+		due_date = add_days(test_start_day, 20)
+		create_sales_order("TEST-DTR-COVERED", 10, due_date, test_start_day)
+		create_purchase_order("TEST-DTR-COVERED", 10, due_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-COVERED", "is_header": 1},
+			fields=["needs_reorder", "needs_reorder_excl_reorder_level", "days_to_reorder"],
+		)
+
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].needs_reorder, 0)
+		self.assertEqual(header[0].needs_reorder_excl_reorder_level, 0)
+		self.assertEqual(header[0].days_to_reorder, _NO_REORDER_SENTINEL)
+
+	def test_days_to_reorder_split_safety_vs_no_safety(self, mock_date):
+		"""
+		When a PO covers demand exactly (scheduled_receipts == demand), there is no true
+		shortage (excl safety stock), but safety stock is still unmet.
+		Expected: needs_reorder=1, needs_reorder_excl_reorder_level=0.
+
+		on_hand=0, scheduled_receipts=10, demand=10, safety_stock=20
+		  excl: 0 - 10 + 10 = 0        → no shortage → needs_reorder_excl = 0
+		  incl: 0 - 10 + 10 - 20 = -20 → shortage    → needs_reorder = 1
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item(
+			"TEST-DTR-SPLIT",
+			"DTR Split Item",
+			"Raw Material",
+			lead_time_days=7,
+			safety_stock=20,
+		)
+
+		due_date = add_days(test_start_day, 14)
+		create_sales_order("TEST-DTR-SPLIT", 10, due_date, test_start_day)
+		create_purchase_order("TEST-DTR-SPLIT", 10, due_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-SPLIT", "is_header": 1},
+			fields=["needs_reorder", "needs_reorder_excl_reorder_level", "days_to_reorder"],
+		)
+
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].needs_reorder, 1)
+		self.assertNotEqual(header[0].days_to_reorder, _NO_REORDER_SENTINEL)
+		self.assertEqual(header[0].needs_reorder_excl_reorder_level, 0)
+
+	def test_scheduled_receipts_value_populated_from_open_po(self, mock_date):
+		"""
+		scheduled_receipts_value must equal (qty - received_qty) * base_rate for an open PO.
+		With no payment terms on the supplier the payable must default to the same period.
+		total_payable must equal suggested_orders_value_payable + scheduled_receipts_value_payable.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "")
+
+		create_item("TEST-SRV-01", "Scheduled Receipts Value Item", "Raw Material", lead_time_days=0)
+
+		po_delivery_date = add_days(test_start_day, 14)
+		# create_purchase_order uses rate=10 per unit; base_rate == rate in the test environment
+		create_purchase_order("TEST-SRV-01", 5, po_delivery_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		po_item = frappe.db.get_value(
+			"Purchase Order Item",
+			{"item_code": "TEST-SRV-01"},
+			["qty", "received_qty", "base_rate"],
+			as_dict=True,
+		)
+		expected_value = (po_item.qty - (po_item.received_qty or 0)) * po_item.base_rate
+
+		po_entry = get_mrp_entry_by_item_week("TEST-SRV-01", po_delivery_date)
+		self.assertEqual(po_entry.scheduled_receipts_value, expected_value)
+		# No payment terms → payable equals value in same period
+		self.assertEqual(po_entry.scheduled_receipts_value_payable, expected_value)
+		# No suggested orders (PO covers all demand) → total_payable == scheduled payable
+		self.assertEqual(po_entry.total_payable, expected_value)
+
+	def test_scheduled_receipts_value_zero_when_no_open_po(self, mock_date):
+		"""
+		Items with no open POs must have scheduled_receipts_value == 0 and
+		scheduled_receipts_value_payable == 0; total_payable must equal
+		suggested_orders_value_payable only.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "")
+
+		create_item("TEST-SRV-02", "No PO Item", "Raw Material", lead_time_days=0)
+
+		so_date = add_days(test_start_day, 14)
+		create_sales_order("TEST-SRV-02", 10, so_date, test_start_day)
+
+		# Set up an item price so suggested_orders_value is non-zero
+		price = frappe.new_doc("Item Price")
+		price.item_code = "TEST-SRV-02"
+		price.price_list_rate = 3
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		so_entry = get_mrp_entry_by_item_week("TEST-SRV-02", so_date)
+		self.assertEqual(so_entry.scheduled_receipts_value or 0, 0)
+		self.assertEqual(so_entry.scheduled_receipts_value_payable or 0, 0)
+		# total_payable must match suggested_orders_value_payable exactly
+		self.assertEqual(so_entry.total_payable, so_entry.suggested_orders_value_payable)
+
+	def test_total_payable_is_sum_of_both_payables(self, mock_date):
+		"""
+		When a week has both a suggested order and an open PO, total_payable must equal
+		the sum of suggested_orders_value_payable and scheduled_receipts_value_payable.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "_Test 0 days after invoice")
+
+		create_item("TEST-SRV-03", "Combined Payable Item", "Raw Material", lead_time_days=0)
+
+		item = frappe.get_doc("Item", "TEST-SRV-03")
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		price = frappe.new_doc("Item Price")
+		price.item_code = "TEST-SRV-03"
+		price.price_list_rate = 4
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		target_date = add_days(test_start_day, 21)
+		# PO: 3 units x base_rate 10 = 30 scheduled value
+		create_purchase_order("TEST-SRV-03", 3, target_date, test_start_day)
+		# SO: 10 units demand, no stock: suggested_orders=10, value=40
+		create_sales_order("TEST-SRV-03", 10, target_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("TEST-SRV-03", target_date)
+		self.assertEqual(
+			entry.total_payable,
+			(entry.suggested_orders_value_payable or 0) + (entry.scheduled_receipts_value_payable or 0),
+		)
+		# Both components must be non-zero to make this test meaningful
+		self.assertGreater(entry.suggested_orders_value_payable or 0, 0)
+		self.assertGreater(entry.scheduled_receipts_value_payable or 0, 0)
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):

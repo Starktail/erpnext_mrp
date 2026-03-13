@@ -10,7 +10,7 @@ The workbench displays the MRP data in a pivoted grid:
 
 -   **Rows**: Each primary row represents a single stock item. You can expand these item rows to reveal detail rows, which break down the calculation for each specific metric (e.g., `On Hand Inventory`, `Open Sales/Work Orders`, `Suggested Receipts`) across the time horizon. The set of metrics shown in these detail rows is configurable — see **Variables/Measures Display Settings** in [MRP Settings](erpnext_mrp_run.md#mrp-settings).
 -   **Columns**: The columns are structured to show both static item information and time-phased planning data.
-    -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `UoM`, `BOM`, `Lvl`, `Safety Stock`, `Re-order Qty`, `Lead Time`, `Supplier`, and `Days to Reorder`.
+    -   **Static Columns**: The initial columns display key item details like `Item Code`, `Item Name`, `Item Group`, `UoM`, `BOM`, `Lvl`, `Safety Stock`, `Re-order Qty`, `Lead Time`, `Supplier`, `Days to Reorder (incl Safety)`, and `Days to Reorder`. The two **Days to Reorder** columns show how many days remain before an order must be placed (negative = already late, `0` = order today). They display `—` when no shortage is projected across the entire planning horizon, meaning the item's current stock and open purchase/work orders fully cover all demand — no action is required.
     -   **Dynamic Weekly Columns**: The subsequent columns represent the weekly time buckets of the planning horizon (e.g., `2026-W40`, `2026-W41`). For the primary item rows, these columns display a single key figure determined by the field selector. For the expanded detail rows, they show the value for that specific metric.
 
 ### Key Features and Actions
