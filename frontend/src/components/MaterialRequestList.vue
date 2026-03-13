@@ -769,8 +769,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
-      render: (row) =>
-        row.type === 'HEADER' ? formatTime(row.days_to_reorder) : '',
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return row.needs_reorder ? formatTime(row.days_to_reorder) : '—'
+      },
     },
     {
       title: `${defaultTimeUnit.value} to Reorder`,
@@ -789,10 +791,12 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
-      render: (row) =>
-        row.type === 'HEADER'
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return row.needs_reorder_excl_reorder_level
           ? formatTime(row.days_to_reorder_excl_reorder_level)
-          : '',
+          : '—'
+      },
     },
   ]
 
@@ -929,6 +933,24 @@ async function executeAsyncQuery() {
       ])
     }
   })
+
+  if (
+    appliedNumberFilters.days_to_reorder.min !== null ||
+    appliedNumberFilters.days_to_reorder.max !== null
+  ) {
+    backendFilters.push(['MRP Entry', 'needs_reorder', '=', 1])
+  }
+  if (
+    appliedNumberFilters.days_to_reorder_excl_reorder_level.min !== null ||
+    appliedNumberFilters.days_to_reorder_excl_reorder_level.max !== null
+  ) {
+    backendFilters.push([
+      'MRP Entry',
+      'needs_reorder_excl_reorder_level',
+      '=',
+      1,
+    ])
+  }
 
   try {
     const count = await call('frappe.client.get_count', {

@@ -51,9 +51,11 @@
   "projected_on_hand_inventory_no_action",
   "column_break_mryl",
   "projected_on_hand_inventory",
+  "needs_reorder",
   "days_to_reorder",
   "column_break_zpfl",
   "projected_on_hand_inventory_excl_reorder_level",
+  "needs_reorder_excl_reorder_level",
   "days_to_reorder_excl_reorder_level"
  ],
  "fields": [
@@ -330,12 +332,24 @@
    "fieldname": "default_supplier_name",
    "fieldtype": "Data",
    "label": "Default Supplier Name"
+  },
+  {
+   "default": "0",
+   "fieldname": "needs_reorder",
+   "fieldtype": "Check",
+   "label": "Needs Reorder (Incl Safety Stock)"
+  },
+  {
+   "default": "0",
+   "fieldname": "needs_reorder_excl_reorder_level",
+   "fieldtype": "Check",
+   "label": "Needs Reorder (Excl Safety Stock)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-23 06:13:50.547789",
+ "modified": "2026-03-13 11:36:18.815851",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

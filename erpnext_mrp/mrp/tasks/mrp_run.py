@@ -3,6 +3,8 @@ import itertools
 import math
 from datetime import date
 
+_NO_REORDER_SENTINEL = 9999
+
 import frappe
 from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
@@ -1068,32 +1070,28 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 		# 1. Standard (with reorder level)
 		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
 		if first_shortage_entry:
-			# When do we need it?
 			needed_date = getdate(first_shortage_entry.target_date)
-			# When should we have ordered it?
 			lead_time = first_shortage_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
-
-			# Days from today (negative means late)
 			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
+			mrp_entry_docs[0].needs_reorder = 1
 		else:
-			mrp_entry_docs[0].days_to_reorder = None
+			mrp_entry_docs[0].days_to_reorder = _NO_REORDER_SENTINEL
+			mrp_entry_docs[0].needs_reorder = 0
 
 		# 2. Excl Reorder Level
 		first_shortage_excl_entry = next(
 			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
 		)
 		if first_shortage_excl_entry:
-			# When do we need it?
 			needed_date = getdate(first_shortage_excl_entry.target_date)
-			# When should we have ordered it?
 			lead_time = first_shortage_excl_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
-
-			# Days from today (negative means late)
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days
+			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 1
 		else:
-			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = None
+			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = _NO_REORDER_SENTINEL
+			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 0
 
 		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:

@@ -82,7 +82,7 @@ Finally, the system calculates the net position and suggests actions.
     4.  **Suggested Receipts**: If a shortage exists, the system calculates a `Suggested Receipt`. This value considers the shortage quantity and the item's `Min Order Qty` (from the Item master).
     5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
     6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
-    7.  **Urgency Flag**: If a suggested order is calculated for a period that is already in the past, the item is flagged as `Urgent`.
+    7.  **Days to Reorder**: After all periods are processed, the system calculates how many days remain until the order must be placed. It finds the first period with a suggested receipt and works backward by the item's lead time. A positive value means there are still days to act; a negative value means the order is already late. If no shortage exists across the entire horizon (because scheduled receipts and current stock fully cover demand), this field is blank (`—`) to clearly distinguish "no action needed" from `0` which means "order today". Two variants are calculated: one including the safety stock floor (`Days to Reorder (incl Safety)`) and one excluding it (`Days to Reorder`).
 - **Cash Requirements**: Finally, the system projects the financial impact of the plan.
     - **Order Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
     - **Payable Value**: Projects the cash outflow based on the default Supplier's **Payment Terms**. The system calculates the due date (assuming the invoice is dated upon receipt of goods) and distributes the payable amount to the corresponding weeks.
@@ -117,3 +117,8 @@ The following are the key fields calculated for each item in each period:
 | `projected_on_hand_inventory`   | The projected stock on hand at the end of the period after considering all demand, supply, and suggested receipts.                                                    |
 | `suggested_orders_value`        | The estimated value of the suggested orders.                                                                                                                          |
 | `suggested_orders_value_payable`| The projected cash outflow for the period, based on the supplier's payment terms.                                                                                     |
+| **Urgency Indicators** (header period only) | |
+| `days_to_reorder`               | Days until the order must be placed, accounting for lead time and safety stock. Negative = already late. Blank (`—`) when no shortage is projected across the entire horizon. |
+| `days_to_reorder_excl_reorder_level` | Same as above, but calculated without the safety stock floor. Blank (`—`) when no true shortage (excluding safety stock) is projected. |
+| `needs_reorder`                 | Internal flag (`1`/`0`) set to `1` when a genuine shortage including safety stock was found. Used by the workbench to distinguish "order today" (`0` days) from "no action needed" (`—`). |
+| `needs_reorder_excl_reorder_level` | Same as above, but for the safety-stock-excluded calculation. |

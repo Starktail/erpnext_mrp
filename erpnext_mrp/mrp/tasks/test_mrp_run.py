@@ -10,6 +10,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
 
 from erpnext_mrp.mrp.tasks.mrp_run import (
+	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
 	get_forecast_coverage_status,
 	process_mrp_item_entries,
@@ -1091,10 +1092,11 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entries = frappe.get_all(
 			"MRP Entry",
 			filters={"item_code": "TEST-DTR-01"},
-			fields=["days_to_reorder", "target_date"],
+			fields=["days_to_reorder", "needs_reorder", "target_date"],
 			order_by="target_date asc",
 		)
 		self.assertEqual(mrp_entries[0].days_to_reorder, 11)
+		self.assertEqual(mrp_entries[0].needs_reorder, 1)
 
 		# 2. Test Late Order (Negative days_to_reorder)
 		# Create Item with 10 days lead time
@@ -1115,10 +1117,79 @@ class TestMRPRun(FrappeTestCase):
 		mrp_entries_2 = frappe.get_all(
 			"MRP Entry",
 			filters={"item_code": "TEST-DTR-02"},
-			fields=["days_to_reorder", "target_date"],
+			fields=["days_to_reorder", "needs_reorder", "target_date"],
 			order_by="target_date asc",
 		)
 		self.assertEqual(mrp_entries_2[0].days_to_reorder, -10)
+		self.assertEqual(mrp_entries_2[0].needs_reorder, 1)
+
+	def test_days_to_reorder_null_when_fully_covered(self, mock_date):
+		"""
+		When scheduled_receipts cover all demand for the MRP horizon,
+		suggested_receipts = 0 for all periods. needs_reorder must be 0
+		and days_to_reorder must be the sentinel value, not a real value.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-DTR-COVERED", "DTR Covered Item", "Raw Material", lead_time_days=10)
+
+		due_date = add_days(test_start_day, 20)
+		create_sales_order("TEST-DTR-COVERED", 10, due_date, test_start_day)
+		create_purchase_order("TEST-DTR-COVERED", 10, due_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-COVERED", "is_header": 1},
+			fields=["needs_reorder", "needs_reorder_excl_reorder_level", "days_to_reorder"],
+		)
+
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].needs_reorder, 0)
+		self.assertEqual(header[0].needs_reorder_excl_reorder_level, 0)
+		self.assertEqual(header[0].days_to_reorder, _NO_REORDER_SENTINEL)
+
+	def test_days_to_reorder_split_safety_vs_no_safety(self, mock_date):
+		"""
+		When a PO covers demand exactly (scheduled_receipts == demand), there is no true
+		shortage (excl safety stock), but safety stock is still unmet.
+		Expected: needs_reorder=1, needs_reorder_excl_reorder_level=0.
+
+		on_hand=0, scheduled_receipts=10, demand=10, safety_stock=20
+		  excl: 0 - 10 + 10 = 0        → no shortage → needs_reorder_excl = 0
+		  incl: 0 - 10 + 10 - 20 = -20 → shortage    → needs_reorder = 1
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item(
+			"TEST-DTR-SPLIT",
+			"DTR Split Item",
+			"Raw Material",
+			lead_time_days=7,
+			safety_stock=20,
+		)
+
+		due_date = add_days(test_start_day, 14)
+		create_sales_order("TEST-DTR-SPLIT", 10, due_date, test_start_day)
+		create_purchase_order("TEST-DTR-SPLIT", 10, due_date, test_start_day)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-DTR-SPLIT", "is_header": 1},
+			fields=["needs_reorder", "needs_reorder_excl_reorder_level", "days_to_reorder"],
+		)
+
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].needs_reorder, 1)
+		self.assertNotEqual(header[0].days_to_reorder, _NO_REORDER_SENTINEL)
+		self.assertEqual(header[0].needs_reorder_excl_reorder_level, 0)
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
