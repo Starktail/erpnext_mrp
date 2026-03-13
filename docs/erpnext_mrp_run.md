@@ -31,7 +31,10 @@ The following measures are **enabled by default**:
 | Total Forecast Demand | Demand from forecasts, including BOM-exploded upstream demand |
 | Suggested Orders | Quantity to order, offset by lead time — the primary action field |
 | Suggested Orders Value | Estimated cost of suggested orders |
-| Suggested Orders Payable | Projected cash outflow based on supplier payment terms |
+| Suggested Orders Payable | Projected cash outflow for suggested (not-yet-placed) orders, based on supplier payment terms |
+| Scheduled Receipts Value | Estimated value of open Purchase Order lines due in each period (base currency) |
+| Scheduled Receipts Payable | Projected cash outflow for open Purchase Orders, distributed by supplier payment terms |
+| Total Payable | Combined cash outflow: Scheduled Receipts Payable + Suggested Orders Payable |
 
 The following measures are **disabled by default** (enable them for additional detail):
 
@@ -83,14 +86,18 @@ Finally, the system calculates the net position and suggests actions.
     5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
     6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
     7.  **Days to Reorder**: After all periods are processed, the system calculates how many days remain until the order must be placed. It finds the first period with a suggested receipt and works backward by the item's lead time. A positive value means there are still days to act; a negative value means the order is already late. If no shortage exists across the entire horizon (because scheduled receipts and current stock fully cover demand), this field is blank (`—`) to clearly distinguish "no action needed" from `0` which means "order today". Two variants are calculated: one including the safety stock floor (`Days to Reorder (incl Safety)`) and one excluding it (`Days to Reorder`).
-- **Cash Requirements**: Finally, the system projects the financial impact of the plan.
-    - **Order Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
-    - **Payable Value**: Projects the cash outflow based on the default Supplier's **Payment Terms**. The system calculates the due date (assuming the invoice is dated upon receipt of goods) and distributes the payable amount to the corresponding weeks.
+- **Cash Requirements**: Finally, the system projects the financial impact of the plan across three fields.
+    - **Suggested Orders Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
+    - **Suggested Orders Payable**: Projects the cash outflow for not-yet-placed orders based on the default Supplier's **Payment Terms**. The due date is calculated relative to the week in which the order would be placed.
+    - **Scheduled Orders Value**: Calculates the base-currency value of open Purchase Order lines due in each period, using `(remaining qty × base_rate)` from each PO line. This reflects committed spend already on order.
+    - **Scheduled Orders Payable**: Projects the cash outflow for open Purchase Orders using the same supplier payment terms logic. The due date is calculated relative to the PO delivery week. When a payment term is configured as **Order date**, the delivery week is used as an approximation since the original PO order date is not tracked per-period.
+    - **Total Payable**: The sum of `Scheduled Orders Payable` and `Suggested Orders Payable` — the complete projected cash requirement for the period.
     - **Custom Due Dates**: For more precise cash planning, the system supports dynamic due dates on the `Payment Term` doctype. This allows you to split payments based on milestones:
-        - **Order date**: The payment is calculated relative to when the `Suggested Order` is placed.
-        - **Shipment date**: The payment is calculated relative to the shipment date (Order date + Item's primary lead time).
-        - **Arrival date**: The payment is calculated relative to the arrival date (Order date + Item's total lead time).
+        - **Order date**: The payment is calculated relative to when the order is placed (or the delivery week for open POs).
+        - **Shipment date**: The payment is calculated relative to the shipment date (order/delivery date + Item's primary lead time).
+        - **Arrival date**: The payment is calculated relative to the arrival date (order/delivery date + Item's total lead time).
         - If no custom due date is set, the system defaults to the **Arrival date**.
+    - If no supplier or payment terms are configured for an item, all payable amounts default to the same period as the order or delivery.
 
 ## MRP Entry Fields
 
@@ -116,7 +123,10 @@ The following are the key fields calculated for each item in each period:
 | `suggested_orders`              | The quantity that should be ordered, offset by lead time. This is the primary action field.                                                                           |
 | `projected_on_hand_inventory`   | The projected stock on hand at the end of the period after considering all demand, supply, and suggested receipts.                                                    |
 | `suggested_orders_value`        | The estimated value of the suggested orders.                                                                                                                          |
-| `suggested_orders_value_payable`| The projected cash outflow for the period, based on the supplier's payment terms.                                                                                     |
+| `suggested_orders_value_payable`| Projected cash outflow for not-yet-placed orders, distributed by the supplier's payment terms.                                                                        |
+| `scheduled_receipts_value`      | Base-currency value of open Purchase Order lines due in this period: `SUM((qty − received_qty) × base_rate)`.                                                         |
+| `scheduled_receipts_value_payable` | Projected cash outflow for open Purchase Orders, distributed by the supplier's payment terms relative to the PO delivery week.                                     |
+| `total_payable`                 | Combined projected cash outflow: `scheduled_receipts_value_payable + suggested_orders_value_payable`.                                                                 |
 | **Urgency Indicators** (header period only) | |
 | `days_to_reorder`               | Days until the order must be placed, accounting for lead time and safety stock. Negative = already late. Blank (`—`) when no shortage is projected across the entire horizon. |
 | `days_to_reorder_excl_reorder_level` | Same as above, but calculated without the safety stock floor. Blank (`—`) when no true shortage (excluding safety stock) is projected. |

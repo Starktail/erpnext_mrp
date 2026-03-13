@@ -49,6 +49,10 @@
   "section_suggestions_value",
   "suggested_orders_value",
   "suggested_orders_value_payable",
+  "column_break_fqtm",
+  "scheduled_receipts_value",
+  "scheduled_receipts_value_payable",
+  "total_payable",
   "projected_stock_on_hand_end_of_period_section",
   "projected_on_hand_inventory_no_action",
   "column_break_twpj",
@@ -330,13 +334,35 @@
   {
    "fieldname": "column_break_boes",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_fqtm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "scheduled_receipts_value",
+   "fieldtype": "Check",
+   "label": "Scheduled Orders Value"
+  },
+  {
+   "default": "1",
+   "fieldname": "scheduled_receipts_value_payable",
+   "fieldtype": "Check",
+   "label": "Scheduled Orders Payable"
+  },
+  {
+   "default": "1",
+   "fieldname": "total_payable",
+   "fieldtype": "Check",
+   "label": "Total Orders Payable"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-25 13:26:41.904592",
+ "modified": "2026-03-13 12:31:11.960762",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",
