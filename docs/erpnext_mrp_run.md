@@ -54,38 +54,54 @@ First, the system creates a planning scaffold for all relevant items over the de
 - **Time Horizon Generation**: Based on the "Look Ahead" setting in `MRP Settings`, the system generates a series of weekly periods (e.g., `2026-W40`, `2026-W41`, etc.).
 - **MRP Entry Creation**: An `MRP Entry` record is created for each item for each week in the look-ahead period. This creates the grid of data that will be populated in the subsequent steps.
 
-### 3. Demand Calculation
+### 3. Raw Signal Population
 
-Next, the system calculates all sources of demand.
+Next, the system populates the raw input signals for every item and period in a series of set-based SQL passes. No calculations are performed yet — these are just data loads:
 
-- **Open Orders Demand**:
-    - **Reserved Qty**: Calculates demand from open Sales Orders.
-    - **Reserved Qty for Production**: Calculates demand for raw materials from open Work Orders.
-    - **Upstream Sales Order Demand**: Explodes the demand from Sales Orders down through the BOMs to calculate requirements for sub-assemblies and components.
-- **Forecast Demand**:
-    - **Forecast Demand**: Calculates demand from the `MRP Forecast` doctype for top-level items.
-    - **Upstream Forecast Demand**: Explodes the forecast demand down through the BOMs to calculate requirements for sub-assemblies and components.
+- **Reserved Qty**: Demand from open Sales Orders, grouped by delivery week.
+- **Reserved Qty for Production**: Material requirements from open Work Orders, grouped by planned start week.
+- **Forecast Demand**: Demand from the `MRP Forecast` doctype, grouped by forecast week.
+- **Planned Qty**: Expected supply from open Work Orders (manufactured items), grouped by planned start week.
+- **Ordered Qty** and **Scheduled Receipts Value**: Expected supply and committed spend from open Purchase Orders, grouped by delivery week. The delivery date field and partial-receipt handling are controlled by the `Purchase Order Item Delivery Date Field` and `Assume Remaining Quantity` settings in `MRP Settings`.
 
-### 4. Scheduled Receipts Calculation
+### 4. Level-by-Level Net Explosion
 
-The system then calculates all sources of future supply.
+This is the core of the calculation. The system iterates through each BOM level in order (level 0 first, then 1, 2, and so on). At each level, three steps run in sequence:
 
-- **Planned Qty**: Calculates scheduled receipts from open Work Orders for manufactured items.
-- **Ordered Qty**: Calculates scheduled receipts from open Purchase Orders for purchased items. The delivery date for these receipts is determined by the `Purchase Order Item Delivery Date Field` set in `MRP Settings`. Partially received orders are handled based on the `Assume Remaining Quantity` setting.
+**Step 1 — Roll up totals**
 
-### 5. Totals and Projections
+The raw signals are summed into planning totals for all items at the current level:
+- `Open Orders` = Reserved Qty + Reserved Qty for Production + Upstream Net Demand
+- `Total Forecast Demand` = Forecast Demand
+- `Scheduled Receipts` = Planned Qty + Ordered Qty
 
-Finally, the system calculates the net position and suggests actions.
+**Step 2 — Calculate Suggested Receipts**
 
-- **Totals Calculation**: The various demand and supply fields are summed into total fields like `Open Orders`, `Total Forecast Demand`, and `Scheduled Receipts`.
-- **Suggestions and Projected Stock**: This is the core MRP logic. For each item, the calculation proceeds chronologically, week by week:
-    1.  **Beginning Inventory**: The `On Hand Inventory` for the first period is the current actual stock level. For all subsequent periods, it is the `Projected On Hand Inventory` from the previous period.
-    2.  **Net Requirements**: The system calculates the total demand for the period based on the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
-    3.  **Shortage Calculation**: It determines if there is a shortage by comparing the on-hand inventory and scheduled receipts against the total demand and the item's `Safety Stock` (from the Item master).
-    4.  **Suggested Receipts**: If a shortage exists, the system calculates a `Suggested Receipt`. This value considers the shortage quantity and the item's `Min Order Qty` (from the Item master).
-    5.  **Projected Inventory**: It calculates the `Projected On Hand Inventory` at the end of the period.
-    6.  **Suggested Orders**: The `Suggested Receipt` is offset by the item's lead time to generate a `Suggested Order` in the appropriate earlier time bucket. For example, if an item has a 2-week lead time, a suggested receipt in Week 42 will generate a suggested order in Week 40.
-    7.  **Days to Reorder**: After all periods are processed, the system calculates how many days remain until the order must be placed. It finds the first period with a suggested receipt and works backward by the item's lead time. A positive value means there are still days to act; a negative value means the order is already late. If no shortage exists across the entire horizon (because scheduled receipts and current stock fully cover demand), this field is blank (`—`) to clearly distinguish "no action needed" from `0` which means "order today". Two variants are calculated: one including the safety stock floor (`Days to Reorder (incl Safety)`) and one excluding it (`Days to Reorder`).
+For each item at this level, the system calculates how much needs to be produced or purchased, period by period, in chronological order:
+
+1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level. For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
+2. **Net Requirements**: Total demand is determined by the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
+3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
+4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
+5. **Projected Inventory**: `on_hand_inventory − demand + scheduled_receipts + suggested_receipts`
+
+**Step 3 — Net demand explosion (all levels except the last)**
+
+Once `Suggested Receipts` is known for the current level, that quantity is exploded down to child components:
+
+- For each manufactured item at this level where `suggested_receipts > 0`, the system multiplies by each BOM component's quantity ratio and writes the result into the child item's `Upstream Net Demand` field.
+- The demand is dated by shifting the parent's `target_date` backward by the parent's combined lead time (primary + additional). If this shifted date falls before today, it snaps forward to the current week.
+- Demand from multiple parents is **accumulated** (additive), not overwritten.
+- Because the explosion is anchored on `suggested_receipts` — not on raw demand — children only receive upstream demand when the parent genuinely needs to be produced. If the parent's stock already covers its demand, `suggested_receipts = 0` and no demand propagates to children.
+
+> **"Forecast only" mode note**: Under this mode, `Upstream Net Demand` still flows into `Open Orders` (step 1), but `Open Orders` is ignored when computing demand in step 2 (only `Total Forecast Demand` is used). A child component with no direct forecast therefore receives zero `Suggested Receipts`, even if its parent has a production need. Use "Open Orders + Forecast" if you want upstream production demand to drive component ordering.
+
+### 5. Finalisation
+
+After all levels have been processed, the system computes the output and action fields:
+
+- **Suggested Orders**: Each `Suggested Receipt` is offset backward by the item's lead time to place a `Suggested Order` in the correct earlier period. For example, a suggested receipt in Week 42 for an item with a 2-week lead time generates a suggested order in Week 40.
+- **Days to Reorder**: Calculated for the header period (week 0) only. The system finds the first period with a suggested receipt, works backward by the item's lead time, and computes how many days remain. A positive value means there is still time to act; a negative value means the order is already late. If no shortage is projected across the entire horizon, this field shows `—` to clearly distinguish "no action needed" from `0` (order today). Two variants are calculated: one including the safety stock floor and one excluding it.
 - **Cash Requirements**: Finally, the system projects the financial impact of the plan across three fields.
     - **Suggested Orders Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
     - **Suggested Orders Payable**: Projects the cash outflow for not-yet-placed orders based on the default Supplier's **Payment Terms**. The due date is calculated relative to the week in which the order would be placed.
@@ -114,8 +130,9 @@ The following are the key fields calculated for each item in each period:
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
 | **Inventory & Demand**          |                                                                                                                                                                       |
 | `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
-| `open_orders`                   | Total demand from firm orders (Sales Orders and Work Orders).                                                                                                         |
-| `total_forecast_demand`         | Total demand from forecasts, including exploded demand for components.                                                                                                |
+| `open_orders`                   | Total firm demand for the period: Reserved Qty (Sales Orders) + Reserved Qty for Production (Work Orders) + Upstream Net Demand. |
+| `upstream_net_demand`           | Net demand exploded from parent items at the level above. Written when a parent's `suggested_receipts > 0` and this item appears in the parent's BOM. Accumulated additively from all parents. |
+| `total_forecast_demand`         | Total demand from MRP Forecasts for this item and period.                                                                        |
 | **Supply**                      |                                                                                                                                                                       |
 | `scheduled_receipts`            | Total expected supply from open Work Orders and Purchase Orders.                                                                                                      |
 | **Calculations & Projections**  |                                                                                                                                                                       |

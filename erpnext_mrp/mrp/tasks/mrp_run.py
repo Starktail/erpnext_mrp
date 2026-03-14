@@ -248,22 +248,12 @@ def process_mrp_item_entries(enqueue: bool):
 	"""
 	Main background task to process all MRP calculations for each item and period.
 	"""
-	update_open_orders_demand()
-	update_forecast_demand()
-	update_scheduled_receipts()
-	calculate_totals()
-	calculate_suggestions_and_projected_stock(enqueue=enqueue)
-
-
-def update_open_orders_demand():
 	_update_reserved_qty()
 	_update_reserved_qty_for_production()
-	_update_upstream_so_demand()
-
-
-def update_forecast_demand():
 	_update_forecast_demand()
-	_update_upstream_forecast_demand()
+	_update_planned_qty()
+	_update_ordered_qty()
+	_process_levels_sequentially(enqueue=enqueue)
 
 
 def _update_forecast_demand():
@@ -319,106 +309,6 @@ def _update_forecast_demand():
         WHERE name IN ({names_str})
     """
 	frappe.db.sql(update_query)
-
-
-def _update_upstream_forecast_demand():
-	"""
-	Explodes forecast demand from parent items down to their components using a recursive CTE.
-	"""
-	settings = frappe.get_cached_doc("MRP Settings")
-	lead_time_field = "lead_time_days"
-	if settings.item_lead_time_field:
-		lead_time_field = settings.item_lead_time_field.split("|")[0].strip()
-
-	additional_lead_time_field = None
-	if settings.item_additional_lead_time_field:
-		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
-
-	if additional_lead_time_field:
-		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
-	else:
-		lead_time_expression = f"child_item.`{lead_time_field}`"
-
-	sql_query = f""" # nosemgrep: frappe-sql-format-injection
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level, lead_time, is_manufactured) AS (
-            -- Anchor: Initial demand from MRP entries with forecast_demand
-            SELECT
-                item_code,
-                target_date,
-                forecast_demand,
-                0 as level,
-                lead_time,
-                is_manufactured
-            FROM `tabMRP Entry`
-            WHERE forecast_demand > 0
-
-            UNION ALL
-
-            -- Recursive Step: Explode demand to child components
-            SELECT
-                bom_item.item_code,
-                CASE
-                    WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
-                    ELSE de.target_date
-                END,
-                de.required_qty * bom_item.stock_qty / bom.quantity,
-                de.level + 1,
-                {lead_time_expression},
-                (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
-            FROM DemandExplosion AS de
-            JOIN `tabBOM` AS bom ON de.item_code = bom.item
-            JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
-            JOIN `tabItem` AS child_item ON bom_item.item_code = child_item.name
-            WHERE bom.is_active = 1 AND bom.is_default = 1
-        ),
-        AggregatedDemand AS (
-            -- Aggregate demand for each component by week
-            SELECT
-                item_code,
-                DATE_FORMAT(target_date, '%xCW%v') AS calendar_week,
-                SUM(required_qty) AS total_demand
-            FROM DemandExplosion
-            WHERE level > 0
-            GROUP BY item_code, calendar_week
-        )
-        -- Select the final aggregated demand
-        SELECT * FROM AggregatedDemand;
-    """
-
-	upstream_demand_data = frappe.db.sql(sql_query, as_dict=True)
-
-	if not upstream_demand_data:
-		return
-
-	update_cases = []
-	mrp_entry_names = []
-	for row in upstream_demand_data:
-		mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
-		mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
-		update_cases.append(
-			f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(upstream_forecast_demand, 0) + {row.total_demand}"
-		)
-
-	if not mrp_entry_names:
-		return
-
-	case_str = " ".join(update_cases)
-	names_str = ", ".join(mrp_entry_names)
-
-	update_query = f"""# nosemgrep: frappe-sql-format-injection
-        UPDATE `tabMRP Entry`
-        SET upstream_forecast_demand = CASE
-            {case_str}
-            ELSE upstream_forecast_demand
-        END
-        WHERE name IN ({names_str});
-    """
-	frappe.db.sql(update_query)
-
-
-def update_scheduled_receipts():
-	_update_planned_qty()
-	_update_ordered_qty()
 
 
 def _update_reserved_qty():
@@ -589,101 +479,6 @@ def _update_reserved_qty_for_production():
 	frappe.db.sql(update_query)
 
 
-def _update_upstream_so_demand():
-	"""
-	Explodes open orders demand from parent items down to their components using a recursive CTE.
-	"""
-	settings = frappe.get_cached_doc("MRP Settings")
-	lead_time_field = "lead_time_days"
-	if settings.item_lead_time_field:
-		lead_time_field = settings.item_lead_time_field.split("|")[0].strip()
-
-	additional_lead_time_field = None
-	if settings.item_additional_lead_time_field:
-		additional_lead_time_field = settings.item_additional_lead_time_field.split("|")[0].strip()
-
-	if additional_lead_time_field:
-		lead_time_expression = f"COALESCE(child_item.`{lead_time_field}`, 0) + COALESCE(CAST(NULLIF(child_item.`{additional_lead_time_field}`, '') AS SIGNED), 0)"
-	else:
-		lead_time_expression = f"child_item.`{lead_time_field}`"
-
-	sql_query = f"""# nosemgrep: frappe-sql-format-injection
-        WITH RECURSIVE DemandExplosion (item_code, target_date, required_qty, level, lead_time, is_manufactured) AS (
-            -- Anchor: Initial demand from MRP entries with reserved_qty
-            SELECT
-                item_code,
-                target_date,
-                reserved_qty,
-                0 as level,
-                lead_time,
-                is_manufactured
-            FROM `tabMRP Entry`
-            WHERE reserved_qty > 0
-
-            UNION ALL
-
-            -- Recursive Step: Explode demand to child components
-            SELECT
-                bom_item.item_code,
-                CASE
-                    WHEN de.is_manufactured = 1 THEN DATE_SUB(de.target_date, INTERVAL de.lead_time DAY)
-                    ELSE de.target_date
-                END,
-                de.required_qty * bom_item.stock_qty / bom.quantity,
-                de.level + 1,
-                {lead_time_expression},
-                (EXISTS (SELECT 1 FROM `tabBOM` b WHERE b.item = bom_item.item_code AND b.is_active = 1 AND b.is_default = 1))
-            FROM DemandExplosion AS de
-            JOIN `tabBOM` AS bom ON de.item_code = bom.item
-            JOIN `tabBOM Item` AS bom_item ON bom.name = bom_item.parent
-            JOIN `tabItem` AS child_item ON bom_item.item_code = child_item.name
-            WHERE bom.is_active = 1 AND bom.is_default = 1
-        ),
-        AggregatedDemand AS (
-            -- Aggregate demand for each component by week
-            SELECT
-                item_code,
-                DATE_FORMAT(target_date, '%xCW%v') AS calendar_week,
-                SUM(required_qty) AS total_demand
-            FROM DemandExplosion
-            WHERE level > 0
-            GROUP BY item_code, calendar_week
-        )
-        -- Select the final aggregated demand
-        SELECT * FROM AggregatedDemand;
-    """
-
-	upstream_demand_data = frappe.db.sql(sql_query, as_dict=True)
-
-	if not upstream_demand_data:
-		return
-
-	update_cases = []
-	mrp_entry_names = []
-	for row in upstream_demand_data:
-		mrp_entry_name = f"{row.item_code}-{row.calendar_week}"
-		mrp_entry_names.append(frappe.db.escape(mrp_entry_name))
-		update_cases.append(
-			f"WHEN name = {frappe.db.escape(mrp_entry_name)} THEN COALESCE(upstream_so_demand, 0) + {row.total_demand}"
-		)
-
-	if not mrp_entry_names:
-		return
-
-	case_str = " ".join(update_cases)
-	names_str = ", ".join(mrp_entry_names)
-
-	update_query = f"""# nosemgrep: frappe-sql-format-injection
-        UPDATE `tabMRP Entry`
-        SET upstream_so_demand = CASE
-            {case_str}
-            ELSE upstream_so_demand
-        END
-        WHERE name IN ({names_str});
-    """
-	frappe.db.sql(update_query)
-
-
 def _update_planned_qty():
 	"""
 	Calculates open Work Order quantities (planned receipts) for each item and week,
@@ -825,26 +620,8 @@ def _update_ordered_qty():
 	frappe.db.sql(update_query)
 
 
-def calculate_totals():
-	update_query = """
-        UPDATE `tabMRP Entry`
-        SET
-            open_orders = COALESCE(reserved_qty, 0) + COALESCE(reserved_qty_for_production, 0) + COALESCE(upstream_so_demand, 0),
-            total_forecast_demand = COALESCE(forecast_demand, 0) + COALESCE(upstream_forecast_demand, 0),
-            scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
-    """
-	frappe.db.sql(update_query)
-
-
-def calculate_suggestions_and_projected_stock(enqueue: bool):
-	# Get stock levels
-	filters = frappe._dict({"from_date": date.today(), "to_date": date.today()})
-	stock_level_report = execute_stock_balance_report(filters=filters)
-	# First row contains headers, second row contains data
-	stock_levels = stock_level_report[1]
-
+def _get_all_item_details() -> dict[str, frappe._dict]:
 	settings = frappe.get_cached_doc("MRP Settings")
-	requirement_based_on = settings.requirement_based_on
 
 	lead_time_field = "lead_time_days"
 	if settings.item_lead_time_field:
@@ -867,112 +644,56 @@ def calculate_suggestions_and_projected_stock(enqueue: bool):
 	if settings.reorder_qty_item_field:
 		reorder_qty_field = settings.reorder_qty_item_field.split("|")[0].strip()
 
-	# Get item details in a single query
 	item_details_query = f"""# nosemgrep: frappe-sql-format-injection
         SELECT DISTINCT
             mrp.item_code,
             t_item.safety_stock,
-            t_item.{reorder_qty_field} as reorder_quantity,
-			t_item.valuation_rate as fall_back_valuation_rate,
-            COALESCE(t_item.`{lead_time_field}`, 0) as primary_lead_time,
+            t_item.{reorder_qty_field} AS reorder_quantity,
+            t_item.valuation_rate AS fall_back_valuation_rate,
             {lead_time_expression} AS primary_lead_time,
-			{additional_lead_time_expression} AS additional_lead_time,
+            {additional_lead_time_expression} AS additional_lead_time,
             id.default_supplier
         FROM `tabMRP Entry` AS mrp
-        JOIN `tabItem` AS t_item
-            ON mrp.item_code = t_item.name
+        JOIN `tabItem` AS t_item ON mrp.item_code = t_item.name
         LEFT JOIN `tabItem Default` AS id
             ON mrp.item_code = id.parent AND id.default_supplier IS NOT NULL
     """
-	item_details_list = frappe.db.sql(item_details_query, as_dict=True)
-
-	# Process items in batches
-	batch_size = 500
-	for i in range(0, len(item_details_list), batch_size):
-		batch = item_details_list[i : i + batch_size]
-		if enqueue:
-			frappe.enqueue(
-				"erpnext_mrp.mrp.tasks.mrp_run.process_item_batch",
-				queue="long",
-				item_batch=batch,
-				stock_levels=stock_levels,
-				requirement_based_on=requirement_based_on,
-			)
-		else:
-			process_item_batch(
-				item_batch=batch, stock_levels=stock_levels, requirement_based_on=requirement_based_on
-			)
+	rows = frappe.db.sql(item_details_query, as_dict=True)  # nosemgrep
+	return {row.item_code: row for row in rows}
 
 
-def process_item_batch(item_batch, stock_levels, requirement_based_on):
-	item_codes = [item["item_code"] for item in item_batch]
-
-	# Get all MRP entries for the batch of items with all fields needed for processing
+def _fetch_grouped_mrp_entries(item_codes: list[str]) -> dict[str, list[frappe._dict]]:
 	mrp_entries_dicts = frappe.get_all(
 		"MRP Entry",
 		filters={"item_code": ("in", item_codes)},
-		fields=["*"],  # get all fields
+		fields=["*"],
 		order_by="item_code, target_date asc",
 	)
-
-	# Group MRP entries by item_code
-	grouped_mrp_entries = {}
+	grouped: dict[str, list[frappe._dict]] = {}
 	for entry_dict in mrp_entries_dicts:
-		item_code = entry_dict.item_code
-		if item_code not in grouped_mrp_entries:
-			grouped_mrp_entries[item_code] = []
-		grouped_mrp_entries[item_code].append(entry_dict)
+		grouped.setdefault(entry_dict.item_code, []).append(entry_dict)
+	return grouped
 
-	item_details_map = {item["item_code"]: item for item in item_batch}
 
-	item_prices = _get_item_prices(item_codes)
-
-	# Get supplier payment terms
-	suppliers = list(set(item["default_supplier"] for item in item_batch if item.get("default_supplier")))
-	supplier_payment_terms = {}
-	if suppliers:
-		supplier_payment_terms = {
-			s.name: s.payment_terms
-			for s in frappe.get_all(
-				"Supplier", filters={"name": ("in", suppliers)}, fields=["name", "payment_terms"]
-			)
-		}
-
-	# Get Payment Terms details for custom due dates
-	payment_term_details = {}
-	all_payment_terms = frappe.get_all("Payment Term", fields=["name", "custom_due_date"])
-	for pt in all_payment_terms:
-		payment_term_details[pt.name] = pt
+def _calculate_suggested_receipts_batch(
+	item_codes: list[str],
+	item_details_map: dict[str, frappe._dict],
+	stock_levels: list,
+	requirement_based_on: str,
+) -> None:
+	grouped_mrp_entries = _fetch_grouped_mrp_entries(item_codes)
 
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
 
-		# Check for a buying price list first
-		price = item_prices.get(item_code)
-		if not price:
-			# Get valuation rate from stock levels (Bin)
-			item_stock_levels = [
-				sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0
-			]
-			valuation_rate = 0
-			if item_stock_levels:
-				valuation_rate = sum(item_stock_levels) / len(item_stock_levels)
-			if valuation_rate:
-				price = valuation_rate
-			else:
-				price = item_details.get("fall_back_valuation_rate")
-
-		# Set current stock level as starting stock on hand
 		mrp_entry_docs[0].on_hand_inventory = sum(
-			[stock_level.opening_qty for stock_level in stock_levels if stock_level.item_code == item_code]
+			sl.opening_qty for sl in stock_levels if sl.item_code == item_code
 		)
 		mrp_entry_docs[0].on_hand_inventory_excl_reorder_level = mrp_entry_docs[0].on_hand_inventory
 		mrp_entry_docs[0].on_hand_inventory_no_action = mrp_entry_docs[0].on_hand_inventory
-		total_item_demand = 0
 
 		for index, entry in enumerate(mrp_entry_docs):
-			# Set the starting SOH of the current entry to the projected SOH of the last entry
 			if index != 0:
 				entry.on_hand_inventory_no_action = mrp_entry_docs[
 					index - 1
@@ -981,16 +702,11 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				entry.on_hand_inventory_excl_reorder_level = mrp_entry_docs[
 					index - 1
 				].projected_on_hand_inventory_excl_reorder_level
-			# Set the re-order details
 			if item_details:
 				entry.reorder_level = item_details.get("safety_stock")
 				entry.reorder_quantity = item_details.get("reorder_quantity")
-
-			# Set the default Supplier
-			if item_details:
 				entry.default_supplier = item_details.get("default_supplier")
 
-			# Determine demand based on MRP settings
 			open_orders = entry.open_orders or 0
 			total_forecast_demand = entry.total_forecast_demand or 0
 
@@ -1003,12 +719,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			elif requirement_based_on == "Open Orders + Forecast (orders consume the forecast)":
 				demand = open_orders + max(0, total_forecast_demand - open_orders)
 			else:
-				# Default to Open Orders + Forecast
 				raise ValueError(_("Unkown 'Requirement based on' setting"))
 
-			total_item_demand += demand
-
-			# Determine if there is a shortage taking safety stock into account
 			entry.suggested_receipts = 0
 			shortage = (
 				(entry.on_hand_inventory or 0)
@@ -1017,9 +729,8 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				- (entry.reorder_level or 0)
 			)
 			if shortage < 0:
-				shortage *= -1
 				moq = entry.reorder_quantity or 1
-				entry.suggested_receipts = math.ceil(shortage / moq) * moq
+				entry.suggested_receipts = math.ceil(-shortage / moq) * moq
 
 			entry.projected_on_hand_inventory = (
 				(entry.on_hand_inventory or 0)
@@ -1028,17 +739,13 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				+ (entry.suggested_receipts or 0)
 			)
 
-			# Determine if there is a shortage exlcuding safety stock
 			entry.suggested_receipts_excl_reorder_level = 0
-			shortage_excl_reorder_level = (
+			shortage_excl = (
 				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
 			)
-			if shortage_excl_reorder_level < 0:
-				shortage_excl_reorder_level *= -1
+			if shortage_excl < 0:
 				moq = entry.reorder_quantity or 1
-				entry.suggested_receipts_excl_reorder_level = (
-					math.ceil(shortage_excl_reorder_level / moq) * moq
-				)
+				entry.suggested_receipts_excl_reorder_level = math.ceil(-shortage_excl / moq) * moq
 
 			entry.projected_on_hand_inventory_excl_reorder_level = (
 				(entry.on_hand_inventory_excl_reorder_level or 0)
@@ -1047,31 +754,50 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 				+ (entry.suggested_receipts_excl_reorder_level or 0)
 			)
 
-			# Calculate the inventory level if no suggested receipts are taken into account
 			entry.projected_on_hand_inventory_no_action = (
 				(entry.on_hand_inventory_no_action or 0) - demand + (entry.scheduled_receipts or 0)
 			)
 
-		# Based on lead time, set the suggested order qty for the correct earlier entry
+		for entry in mrp_entry_docs:
+			entry.save()
+
+
+def _finalise_item_batch(
+	item_codes: list[str],
+	item_details_map: dict[str, frappe._dict],
+	stock_levels: list,
+	item_prices: dict[str, float],
+	supplier_payment_terms: dict[str, str],
+	payment_term_details: dict[str, frappe._dict],
+) -> None:
+	grouped_mrp_entries = _fetch_grouped_mrp_entries(item_codes)
+
+	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
+		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
+		item_details = item_details_map.get(item_code)
+
+		price = item_prices.get(item_code)
+		if not price:
+			item_stock_levels = [
+				sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0
+			]
+			valuation_rate = sum(item_stock_levels) / len(item_stock_levels) if item_stock_levels else 0
+			price = valuation_rate or (item_details.get("fall_back_valuation_rate") if item_details else None)
+
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
 			if entry.suggested_receipts:
 				weeks_before = math.ceil(entry.lead_time / 7)
-				# If we should have ordered already, set suggested_orders in current period
 				if index - weeks_before < 0:
 					mrp_entry_docs[0].suggested_orders = (
 						mrp_entry_docs[0].suggested_orders or 0
 					) + entry.suggested_receipts
-				# Else, set suggested_orders in leadtime-adjusted period
 				else:
 					mrp_entry_docs[index - weeks_before].suggested_orders = (
 						mrp_entry_docs[index - weeks_before].suggested_orders or 0
 					) + entry.suggested_receipts
 
-		# Determine Days to Reorder
-		# Find the first period with suggested receipts
 		today = date.today()
 
-		# 1. Standard (with reorder level)
 		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
 		if first_shortage_entry:
 			needed_date = getdate(first_shortage_entry.target_date)
@@ -1083,7 +809,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			mrp_entry_docs[0].days_to_reorder = _NO_REORDER_SENTINEL
 			mrp_entry_docs[0].needs_reorder = 0
 
-		# 2. Excl Reorder Level
 		first_shortage_excl_entry = next(
 			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
 		)
@@ -1097,7 +822,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = _NO_REORDER_SENTINEL
 			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 0
 
-		# Now that all suggested_orders have been calculated, calculate their value
 		if price and price > 0:
 			for entry in mrp_entry_docs:
 				if entry.suggested_orders:
@@ -1105,12 +829,10 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 					if entry.suggested_orders_value != new_value:
 						entry.suggested_orders_value = new_value
 
-		# Calculate Cash Requirement (Payable Value)
-		supplier_name = item_details.get("default_supplier")
+		supplier_name = item_details.get("default_supplier") if item_details else None
 		payment_terms_template = supplier_payment_terms.get(supplier_name) if supplier_name else None
 
 		if supplier_name and payment_terms_template:
-			# Map to quickly find entry by name
 			entry_map = {e.name: e for e in mrp_entry_docs}
 			for entry in mrp_entry_docs:
 				if entry.suggested_orders_value:
@@ -1122,14 +844,12 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 					)
 					if schedule:
 						for term in schedule:
-							# Determine the base date for due date calculation
 							base_date = None
 							payment_term_name = term.get("payment_term")
 							if payment_term_name:
 								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
 									"custom_due_date"
 								)
-
 								if custom_due_date_type == "Order date":
 									base_date = entry.target_date
 								elif custom_due_date_type == "Shipment date":
@@ -1137,21 +857,17 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 										entry.target_date, item_details.get("primary_lead_time") or 0
 									)
 								elif custom_due_date_type == "Arrival date":
-									# Arrival Date Order Date (Order + Total Lead Time)
 									total_lead_time = (item_details.get("primary_lead_time") or 0) + (
 										item_details.get("additional_lead_time") or 0
 									)
 									base_date = add_days(entry.target_date, total_lead_time)
 								else:
 									base_date = entry.target_date
-
 							if base_date:
 								term.due_date = get_due_date(term, posting_date=base_date)
-
 							due_date = term.get("due_date")
 							payment_amount = term.get("payment_amount")
 							if due_date and payment_amount:
-								# Find target entry CW
 								year, week, _day = getdate(due_date).isocalendar()
 								target_name = f"{item_code}-{year}CW{week:02d}"
 								target_entry = entry_map.get(target_name)
@@ -1164,7 +880,6 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 										mrp_entry_docs[0].suggested_orders_value_payable or 0
 									) + payment_amount
 		else:
-			# If there are no default supplier or no terms, default to same period payable
 			for entry in mrp_entry_docs:
 				entry.suggested_orders_value_payable = entry.suggested_orders_value
 
@@ -1193,26 +908,19 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
 									"custom_due_date"
 								)
-
 								if custom_due_date_type == "Order date":
-									# Approximation: use arrival date since actual PO order
-									# date is not available in this context.
 									base_date = entry.target_date
 								elif custom_due_date_type == "Shipment date":
-									# Arrival date minus transit (additional_lead_time)
 									base_date = add_days(
 										entry.target_date,
 										-(item_details.get("additional_lead_time") or 0),
 									)
 								elif custom_due_date_type == "Arrival date":
-									# entry.target_date is already the arrival date
 									base_date = entry.target_date
 								else:
 									base_date = entry.target_date
-
 							if base_date:
 								term.due_date = get_due_date(term, posting_date=base_date)
-
 							due_date = term.get("due_date")
 							payment_amount = term.get("payment_amount")
 							if due_date and payment_amount:
@@ -1235,9 +943,182 @@ def process_item_batch(item_batch, stock_levels, requirement_based_on):
 			entry.total_payable = (entry.suggested_orders_value_payable or 0) + (
 				entry.scheduled_receipts_value_payable or 0
 			)
-
-		for entry in mrp_entry_docs:
 			entry.save()
+
+
+def _calculate_totals_for_level(level: int) -> None:
+	frappe.db.sql(
+		"""
+        UPDATE `tabMRP Entry`
+        SET
+            open_orders = COALESCE(reserved_qty, 0)
+                        + COALESCE(reserved_qty_for_production, 0)
+                        + COALESCE(upstream_net_demand, 0),
+            total_forecast_demand = COALESCE(forecast_demand, 0),
+            scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
+        WHERE bom_level = %(level)s
+        """,
+		values={"level": level},
+	)
+
+
+def _explode_net_demand_for_level(level: int) -> None:
+	today = date.today()
+	sql_query = """# nosemgrep: frappe-sql-format-injection
+        SELECT
+            bom_item.item_code AS child_item_code,
+            DATE_FORMAT(
+                GREATEST(
+                    CASE
+                        WHEN parent_me.is_manufactured = 1
+                            THEN DATE_SUB(parent_me.target_date, INTERVAL parent_me.lead_time DAY)
+                        ELSE parent_me.target_date
+                    END,
+                    %(today)s
+                ),
+                '%%xCW%%v'
+            ) AS calendar_week,
+            SUM(
+                parent_me.suggested_receipts * bom_item.stock_qty / bom.quantity
+            ) AS demand_qty
+        FROM `tabMRP Entry` AS parent_me
+        JOIN `tabBOM` AS bom
+            ON parent_me.item_code = bom.item
+            AND bom.is_active = 1
+            AND bom.is_default = 1
+        JOIN `tabBOM Item` AS bom_item
+            ON bom.name = bom_item.parent
+        WHERE
+            parent_me.bom_level = %(level)s
+            AND parent_me.is_manufactured = 1
+            AND parent_me.suggested_receipts > 0
+        GROUP BY
+            bom_item.item_code,
+            calendar_week
+    """
+	explosion_data = frappe.db.sql(
+		sql_query, values={"level": level, "today": today}, as_dict=True
+	)  # nosemgrep
+
+	if not explosion_data:
+		return
+
+	update_cases: list[str] = []
+	mrp_entry_names: list[str] = []
+	for row in explosion_data:
+		mrp_entry_name = f"{row.child_item_code}-{row.calendar_week}"
+		escaped_name = frappe.db.escape(mrp_entry_name)
+		demand_qty = float(row.demand_qty)
+		mrp_entry_names.append(escaped_name)
+		update_cases.append(
+			f"WHEN name = {escaped_name} THEN COALESCE(upstream_net_demand, 0) + {demand_qty}"
+		)
+
+	case_str = " ".join(update_cases)
+	names_str = ", ".join(mrp_entry_names)
+	update_query = f"""# nosemgrep: frappe-sql-format-injection
+        UPDATE `tabMRP Entry`
+        SET upstream_net_demand = CASE
+            {case_str}
+            ELSE upstream_net_demand
+        END
+        WHERE name IN ({names_str})
+    """
+	frappe.db.sql(update_query)  # nosemgrep
+
+
+def _process_suggested_receipts_for_level(
+	level: int,
+	stock_levels: list,
+	item_details_map: dict[str, frappe._dict],
+	requirement_based_on: str,
+) -> None:
+	item_codes_at_level: list[str] = frappe.db.sql_list(
+		"SELECT DISTINCT item_code FROM `tabMRP Entry` WHERE bom_level = %(level)s",
+		values={"level": level},
+	)
+	batch_size = 500
+	for i in range(0, len(item_codes_at_level), batch_size):
+		batch_codes = item_codes_at_level[i : i + batch_size]
+		batch = [item_details_map[c] for c in batch_codes if c in item_details_map]
+		if not batch:
+			continue
+		batch_item_codes = [item["item_code"] for item in batch]
+		batch_map = {item["item_code"]: item for item in batch}
+		_calculate_suggested_receipts_batch(batch_item_codes, batch_map, stock_levels, requirement_based_on)
+
+
+def _finalise_suggestions(
+	stock_levels: list,
+	item_details_map: dict[str, frappe._dict],
+	enqueue: bool,
+) -> None:
+	item_codes = list(item_details_map.keys())
+	item_prices = _get_item_prices(item_codes)
+
+	suppliers = list(
+		set(v["default_supplier"] for v in item_details_map.values() if v.get("default_supplier"))
+	)
+	supplier_payment_terms: dict[str, str] = {}
+	if suppliers:
+		supplier_payment_terms = {
+			s.name: s.payment_terms
+			for s in frappe.get_all(
+				"Supplier", filters={"name": ("in", suppliers)}, fields=["name", "payment_terms"]
+			)
+		}
+	payment_term_details: dict[str, frappe._dict] = {
+		pt.name: pt for pt in frappe.get_all("Payment Term", fields=["name", "custom_due_date"])
+	}
+
+	batch_size = 250
+	all_item_details = list(item_details_map.values())
+	for i in range(0, len(all_item_details), batch_size):
+		batch = all_item_details[i : i + batch_size]
+		batch_codes = [item["item_code"] for item in batch]
+		batch_map = {item["item_code"]: item for item in batch}
+		if enqueue:
+			frappe.enqueue(
+				"erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch",
+				queue="long",
+				item_codes=batch_codes,
+				item_details_map=batch_map,
+				stock_levels=stock_levels,
+				item_prices=item_prices,
+				supplier_payment_terms=supplier_payment_terms,
+				payment_term_details=payment_term_details,
+			)
+		else:
+			_finalise_item_batch(
+				item_codes=batch_codes,
+				item_details_map=batch_map,
+				stock_levels=stock_levels,
+				item_prices=item_prices,
+				supplier_payment_terms=supplier_payment_terms,
+				payment_term_details=payment_term_details,
+			)
+
+
+def _process_levels_sequentially(enqueue: bool) -> None:
+	filters = frappe._dict({"from_date": date.today(), "to_date": date.today()})
+	stock_level_report = execute_stock_balance_report(filters=filters)
+	stock_levels = stock_level_report[1]
+
+	settings = frappe.get_cached_doc("MRP Settings")
+	requirement_based_on = settings.requirement_based_on
+
+	max_level_result = frappe.db.sql("SELECT COALESCE(MAX(bom_level), 0) FROM `tabMRP Entry`")
+	max_level = int(max_level_result[0][0])
+
+	item_details_map = _get_all_item_details()
+
+	for level in range(max_level + 1):
+		_calculate_totals_for_level(level)
+		_process_suggested_receipts_for_level(level, stock_levels, item_details_map, requirement_based_on)
+		if level < max_level:
+			_explode_net_demand_for_level(level)
+
+	_finalise_suggestions(stock_levels=stock_levels, item_details_map=item_details_map, enqueue=enqueue)
 
 
 def _get_item_prices(item_codes: list[str]) -> dict[str, float]:

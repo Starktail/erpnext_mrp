@@ -183,10 +183,14 @@ class TestMRPRun(FrappeTestCase):
 
 	def test_process_mrp_item_entries_have_correct_upstream_forecast(self, mock_date):
 		"""
-		Test that MRP Entry records have correct upstream forecast
+		Test that MRP Entry records have correct upstream net demand (via forecast-driven explosion)
 		"""
 		test_start_day = datetime.date(2025, 11, 4)
 		mock_date.today.return_value = test_start_day
+
+		# Zero out safety stock and MOQ on manufactured items so suggested_receipts == raw demand
+		for item_code in ("SR04820", "SRZ00963", "SRZ00967"):
+			frappe.db.set_value("Item", item_code, {"safety_stock": 0, "min_order_qty": 1})
 
 		# Create an MRP Forecast for ~70 days (compound lead time for our test item) from now
 		final_item_forecast_date = add_to_date(test_start_day, days=70)
@@ -207,72 +211,72 @@ class TestMRPRun(FrappeTestCase):
 		# Validate items that are consumed by "SR04820 - MRP Test Sales Item (Assembly)"
 		# This manufactured item has a lead time of 14 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 14 days before the forecast date for the final item
 		# ==============================================================================================================
 		forecast_date = add_to_date(final_item_forecast_date, days=-14)
 
-		# Expect an upstream forecast demand for "SRZ00963 - MRP Test Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00963 - MRP Test Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00963", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00962 - MRP Test BOM Item 3"
+		# Expect an upstream net demand for "SRZ00962 - MRP Test BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00962", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 10)  # Qty of 10, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 10)  # Qty of 10, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00961 - MRP Test BOM Item 2"
+		# Expect an upstream net demand for "SRZ00961 - MRP Test BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00961", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1" (level-1 path)
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00963 - MRP Test Sub-Assembly"
 		# This manufactured item has a lead time of 21 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 21 + 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 21 + 14 days before the forecast date
 		# ==============================================================================================================
 		forecast_date = add_to_date(final_item_forecast_date, days=-35)
 
-		# Expect an upstream forecast demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00967", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00964 - MRP Test SA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00964 - MRP Test SA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00964", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00966 - MRP Test SA BOM Item 3"
+		# Expect an upstream net demand for "SRZ00966 - MRP Test SA BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00966", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00965 - MRP Test SA BOM Item 2"
+		# Expect an upstream net demand for "SRZ00965 - MRP Test SA BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00965", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		# This manufactured item has a lead time of 7 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 7 + 21 + 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 7 + 21 + 14 days before the forecast date
 		# ==============================================================================================================
 		forecast_date = add_to_date(final_item_forecast_date, days=-42)
 
-		# Expect an upstream forecast demand for "SRZ00968 - MRP Test SSA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00968 - MRP Test SSA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00968", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1" (level-3 path)
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 		# ==============================================================================================================
 
 	def test_process_mrp_item_entries_with_additional_lead_time(self, mock_date):
 		"""
-		Test that MRP Entry records have correct upstream forecast when using an additional lead time field
+		Test that MRP Entry records have correct upstream net demand when using an additional lead time field
 		"""
 		# Create a custom field to use as additional lead time
 		if not frappe.db.exists("Custom Field", "Item-custom_additional_lead_time"):
@@ -294,6 +298,10 @@ class TestMRPRun(FrappeTestCase):
 		frappe.db.set_value("Item", "SRZ00963", "custom_additional_lead_time", 2)
 		# Original lead_time_days is 7. Total is now 10.
 		frappe.db.set_value("Item", "SRZ00967", "custom_additional_lead_time", 3)
+
+		# Zero out safety stock and MOQ on manufactured items so suggested_receipts == raw demand
+		for item_code in ("SR04820", "SRZ00963", "SRZ00967"):
+			frappe.db.set_value("Item", item_code, {"safety_stock": 0, "min_order_qty": 1})
 
 		# Update MRP Settings to use the custom field
 		self.mrp_settings.item_additional_lead_time_field = (
@@ -325,69 +333,75 @@ class TestMRPRun(FrappeTestCase):
 		# ==============================================================================================================
 		forecast_date = add_to_date(final_item_forecast_date, days=-15)
 
-		# Expect an upstream forecast demand for "SRZ00963 - MRP Test Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00963 - MRP Test Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00963", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00962 - MRP Test BOM Item 3"
+		# Expect an upstream net demand for "SRZ00962 - MRP Test BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00962", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 10)  # Qty of 10, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 10)  # Qty of 10, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00961 - MRP Test BOM Item 2"
+		# Expect an upstream net demand for "SRZ00961 - MRP Test BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00961", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00963 - MRP Test Sub-Assembly"
 		# This manufactured item has a lead time of 21 + 2 = 23 days
-		# Meaning, forecast for the sub-items below should be 23 + 15 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 23 + 15 days before the forecast date
 		# ==============================================================================================================
 		forecast_date = add_to_date(final_item_forecast_date, days=-(15 + 23))
 
-		# Expect an upstream forecast demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00967", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00964 - MRP Test SA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00964 - MRP Test SA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00964", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00966 - MRP Test SA BOM Item 3"
+		# Expect an upstream net demand for "SRZ00966 - MRP Test SA BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00966", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00965 - MRP Test SA BOM Item 2"
+		# Expect an upstream net demand for "SRZ00965 - MRP Test SA BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00965", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		# This manufactured item has a lead time of 7 + 3 = 10 days
-		# Meaning, forecast for the sub-items below should be 10 + 23 + 15 days before the forecast date for the final item
+		# The net explosion anchors on target_date (today + 4 weeks = 2025-12-02), not the conceptual
+		# demand date (Jan 13 - 38 = Dec 6). So: target_date(CW49) - 10 = Dec 2 - 10 = Nov 22 = CW47.
 		# ==============================================================================================================
-		forecast_date = add_to_date(final_item_forecast_date, days=-(15 + 23 + 10))
+		szr967_target_date = add_to_date(test_start_day, days=4 * 7)  # today + 4 weeks = CW49 target_date
+		forecast_date = add_to_date(szr967_target_date, days=-10)  # CW49 target_date - lead_time = CW47
 
-		# Expect an upstream forecast demand for "SRZ00968 - MRP Test SSA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00968 - MRP Test SSA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00968", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", forecast_date)
-		self.assertEqual(mrp_entry.upstream_forecast_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 		# ==============================================================================================================
 
 	def test_process_mrp_item_entries_have_correct_upstream_sales_order_demand(self, mock_date):
 		"""
-		Test that MRP Entry records have correct upstream Sales Order-based demand
+		Test that MRP Entry records have correct upstream net demand (via SO-driven explosion)
 		"""
 		test_start_day = datetime.date(2025, 11, 4)
 		mock_date.today.return_value = test_start_day
+
+		# Zero out safety stock and MOQ on manufactured items so suggested_receipts == raw demand
+		for item_code in ("SR04820", "SRZ00963", "SRZ00967"):
+			frappe.db.set_value("Item", item_code, {"safety_stock": 0, "min_order_qty": 1})
 
 		# Create Sales Order due ~70 days (compound lead time for our test item) from now
 		final_item_so_date = add_to_date(test_start_day, days=70)
@@ -406,77 +420,68 @@ class TestMRPRun(FrappeTestCase):
 		# Validate items that are consumed by "SR04820 - MRP Test Sales Item (Assembly)"
 		# This manufactured item has a lead time of 14 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 14 days before the SO date
 		# ==============================================================================================================
 		so_demand_date = add_to_date(final_item_so_date, days=-14)
 
-		# Expect an upstream forecast demand for "SRZ00963 - MRP Test Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00963 - MRP Test Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00963", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00962 - MRP Test BOM Item 3"
+		# Expect an upstream net demand for "SRZ00962 - MRP Test BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00962", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 10)  # Qty of 10, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 10)  # Qty of 10, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00961 - MRP Test BOM Item 2"
+		# Expect an upstream net demand for "SRZ00961 - MRP Test BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00961", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00963 - MRP Test Sub-Assembly"
 		# This manufactured item has a lead time of 21 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 21 + 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 21 + 14 days before the SO date
 		# ==============================================================================================================
 		so_demand_date = add_to_date(final_item_so_date, days=-35)
 
-		# Expect an upstream forecast demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
+		# Expect an upstream net demand for "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00967", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00964 - MRP Test SA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00964 - MRP Test SA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00964", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00966 - MRP Test SA BOM Item 3"
+		# Expect an upstream net demand for "SRZ00966 - MRP Test SA BOM Item 3"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00966", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00965 - MRP Test SA BOM Item 2"
+		# Expect an upstream net demand for "SRZ00965 - MRP Test SA BOM Item 2"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00965", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 2)  # Qty of 2, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 2)  # Qty of 2, as per BOM
 		# ==============================================================================================================
 
 		# ==============================================================================================================
 		# Validate items that are consumed by "SRZ00967 - MRP Test Sub-Sub-Assembly"
 		# This manufactured item has a lead time of 7 days, as per erpnext_mrp/tests/test_mrp_data_items.json
 
-		# Meaning, forecast for the sub-items below should be 7 + 21 + 14 days before the forecast date for the final item
+		# Meaning, upstream demand for sub-items below should be 7 + 21 + 14 days before the SO date
 		# ==============================================================================================================
 		so_demand_date = add_to_date(final_item_so_date, days=-42)
 
-		# Expect an upstream forecast demand for "SRZ00968 - MRP Test SSA BOM Item 1"
+		# Expect an upstream net demand for "SRZ00968 - MRP Test SSA BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00968", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 1)  # Qty of 1, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 1)  # Qty of 1, as per BOM
 
-		# Expect an upstream forecast demand for "SRZ00960 - MRP Test BOM Item 1"
+		# Expect an upstream net demand for "SRZ00960 - MRP Test BOM Item 1"
 		mrp_entry = get_mrp_entry_by_item_week("SRZ00960", so_demand_date)
-		self.assertEqual(mrp_entry.upstream_so_demand, 4)  # Qty of 4, as per BOM
+		self.assertEqual(mrp_entry.upstream_net_demand, 4)  # Qty of 4, as per BOM
 		# ==============================================================================================================
-
-		# TODO
-		# Test that scheduled_receipts populates correctly on MRP Entries (planned_qty & ordered_qty)
-		# Test that suggested_receipts populates correctly on MRP Entries
-		# Test that suggested_orders populates correctly on MRP Entries
-		# Test that projected_on_hand_inventory populates correctly on MRP Entries
-		# Test that correct Urgency Level is calculated on MRP Entries
-
-		# Add another demand for parent item (SR04820) with different due date, to test that qtys are aggregated
 
 	def test_item_with_long_lead_time(self, mock_date):
 		"""
@@ -1304,6 +1309,279 @@ class TestMRPRun(FrappeTestCase):
 		# Both components must be non-zero to make this test meaningful
 		self.assertGreater(entry.suggested_orders_value_payable or 0, 0)
 		self.assertGreater(entry.scheduled_receipts_value_payable or 0, 0)
+
+	def test_net_explosion_suppressed_when_parent_has_stock(self, mock_date):
+		"""
+		When a parent's stock fully covers its demand, suggested_receipts = 0 and children
+		receive zero upstream_net_demand. Primary regression test for the gross→net change.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		make_stock_entry(
+			item_code="TEST-NET-PARENT",
+			posting_date=add_days(test_start_day, -1),
+			qty=20,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.save()
+
+		create_mrp_forecast(
+			{"item_code": "TEST-NET-PARENT", "forecast_date": test_start_day, "forecast_quantity": 10}
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		parent_entry = get_mrp_entry_by_item_week("TEST-NET-PARENT", test_start_day)
+		self.assertEqual(parent_entry.suggested_receipts, 0)
+
+		child_entries = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-NET-CHILD"},
+			fields=["upstream_net_demand", "suggested_receipts"],
+		)
+		for entry in child_entries:
+			self.assertEqual(entry.upstream_net_demand or 0, 0)
+			self.assertEqual(entry.suggested_receipts or 0, 0)
+
+	def test_net_explosion_fires_when_parent_has_shortage(self, mock_date):
+		"""
+		When a parent has a shortage, upstream_net_demand is written to the child in the correct
+		week, scaled by BOM quantity.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.save()
+
+		create_mrp_forecast(
+			{"item_code": "TEST-NET-PARENT", "forecast_date": test_start_day, "forecast_quantity": 10}
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Parent has no stock → shortage → suggested_receipts = 10
+		parent_entry = get_mrp_entry_by_item_week("TEST-NET-PARENT", test_start_day)
+		self.assertEqual(parent_entry.suggested_receipts, 10)
+
+		# Child demand snaps to current week (lead_time=7d would push to previous week, GREATEST snaps forward)
+		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
+		self.assertEqual(child_entry.upstream_net_demand, 20)  # 10 x 2 BOM qty
+		self.assertGreater(child_entry.suggested_receipts, 0)
+
+	def test_net_explosion_selective_by_week(self, mock_date):
+		"""
+		The explosion is week-selective: only weeks where the parent has a genuine production
+		shortage cascade to children.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		make_stock_entry(
+			item_code="TEST-NET-PARENT",
+			posting_date=add_days(test_start_day, -1),
+			qty=20,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.save()
+
+		# Three weeks of demand: stock covers weeks 0 and 1, shortage only in week 2
+		for offset in (0, 7, 14):
+			create_mrp_forecast(
+				{
+					"item_code": "TEST-NET-PARENT",
+					"forecast_date": add_days(test_start_day, offset),
+					"forecast_quantity": 10,
+				}
+			)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Parent: only week 2 has a production need
+		parent_w0 = get_mrp_entry_by_item_week("TEST-NET-PARENT", test_start_day)
+		parent_w2 = get_mrp_entry_by_item_week("TEST-NET-PARENT", add_days(test_start_day, 14))
+		self.assertEqual(parent_w0.suggested_receipts or 0, 0)
+		self.assertEqual(parent_w2.suggested_receipts, 10)
+
+		# Child: upstream demand only in week 1 (week 2 target_date - 7d lead time = week 1)
+		child_w0 = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
+		child_w1 = get_mrp_entry_by_item_week("TEST-NET-CHILD", add_days(test_start_day, 7))
+		child_w2 = get_mrp_entry_by_item_week("TEST-NET-CHILD", add_days(test_start_day, 14))
+		self.assertEqual(child_w0.upstream_net_demand or 0, 0)
+		self.assertEqual(child_w1.upstream_net_demand, 20)  # 10 x 2 BOM qty
+		self.assertEqual(child_w2.upstream_net_demand or 0, 0)
+
+	def test_net_explosion_moq_rounding_propagates_to_child(self, mock_date):
+		"""
+		The child receives demand based on the MOQ-rounded suggested_receipts of the parent,
+		not the raw shortage quantity.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-MOQ-PARENT", "MOQ Parent", "Raw Material", lead_time_days=0, min_order_qty=10)
+		create_item("TEST-NET-MOQ-CHILD", "MOQ Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-MOQ-PARENT", [{"item_code": "TEST-NET-MOQ-CHILD", "qty": 3}])
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-MOQ-PARENT', 'TEST-NET-MOQ-CHILD']"
+		self.mrp_settings.save()
+
+		# Forecast 7 units in week 1; MOQ=10 → suggested_receipts rounds up to 10
+		create_mrp_forecast(
+			{
+				"item_code": "TEST-NET-MOQ-PARENT",
+				"forecast_date": add_days(test_start_day, 7),
+				"forecast_quantity": 7,
+			}
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		parent_entry = get_mrp_entry_by_item_week("TEST-NET-MOQ-PARENT", add_days(test_start_day, 7))
+		self.assertEqual(parent_entry.suggested_receipts, 10)
+
+		child_entry = get_mrp_entry_by_item_week("TEST-NET-MOQ-CHILD", add_days(test_start_day, 7))
+		self.assertEqual(child_entry.upstream_net_demand, 30)  # 10 (MOQ-rounded) x 3 BOM qty
+		self.assertNotEqual(child_entry.upstream_net_demand, 21)  # gross behaviour would give 7 x 3
+
+	def test_net_explosion_accumulates_from_multiple_parents(self, mock_date):
+		"""
+		When a shared component receives upstream_net_demand from two different parents at the
+		same BOM level, the quantities are correctly accumulated, not overwritten.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-SHARED-A", "Shared Parent A", "Raw Material", lead_time_days=0)
+		create_item("TEST-SHARED-B", "Shared Parent B", "Raw Material", lead_time_days=0)
+		create_item("TEST-SHARED-COMP", "Shared Component", "Raw Material", lead_time_days=0)
+		make_bom("TEST-SHARED-A", [{"item_code": "TEST-SHARED-COMP", "qty": 3}])
+		make_bom("TEST-SHARED-B", [{"item_code": "TEST-SHARED-COMP", "qty": 5}])
+
+		self.mrp_settings.item_condition = (
+			"doc.item_code in ['TEST-SHARED-A', 'TEST-SHARED-B', 'TEST-SHARED-COMP']"
+		)
+		self.mrp_settings.save()
+
+		week1 = add_days(test_start_day, 7)
+		create_mrp_forecast({"item_code": "TEST-SHARED-A", "forecast_date": week1, "forecast_quantity": 10})
+		create_mrp_forecast({"item_code": "TEST-SHARED-B", "forecast_date": week1, "forecast_quantity": 10})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		comp_entry = get_mrp_entry_by_item_week("TEST-SHARED-COMP", week1)
+		# From A: 10 x 3 = 30; from B: 10 x 5 = 50; total = 80
+		self.assertEqual(comp_entry.upstream_net_demand, 80)
+		self.assertNotEqual(comp_entry.upstream_net_demand, 30)  # A-only
+		self.assertNotEqual(comp_entry.upstream_net_demand, 50)  # B-only
+
+	def test_net_explosion_date_shift_uses_combined_lead_time(self, mock_date):
+		"""
+		The child's demand date is shifted by the parent's combined lead time (primary +
+		additional), which is already stored in MRP Entry.lead_time at scaffold time.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		if not frappe.db.exists("Custom Field", "Item-custom_additional_lead_time"):
+			frappe.get_doc(
+				{
+					"doctype": "Custom Field",
+					"dt": "Item",
+					"fieldname": "custom_additional_lead_time",
+					"label": "Custom Additional Lead Time",
+					"fieldtype": "Data",
+					"insert_after": "lead_time_days",
+				}
+			).insert()
+
+		create_item("TEST-NET-COMBINED-PARENT", "Combined LT Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-COMBINED-CHILD", "Combined LT Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-COMBINED-PARENT", [{"item_code": "TEST-NET-COMBINED-CHILD", "qty": 1}])
+
+		frappe.db.set_value("Item", "TEST-NET-COMBINED-PARENT", "custom_additional_lead_time", 7)
+
+		self.mrp_settings.item_condition = (
+			"doc.item_code in ['TEST-NET-COMBINED-PARENT', 'TEST-NET-COMBINED-CHILD']"
+		)
+		self.mrp_settings.item_additional_lead_time_field = (
+			"custom_additional_lead_time | Custom Additional Lead Time"
+		)
+		self.mrp_settings.save()
+
+		# Forecast in week 2 (day 14). Combined lead_time = 7 + 7 = 14d → child demand lands in week 0
+		create_mrp_forecast(
+			{
+				"item_code": "TEST-NET-COMBINED-PARENT",
+				"forecast_date": add_days(test_start_day, 14),
+				"forecast_quantity": 10,
+			}
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		# Child demand must land in week 0 (14d shift), NOT week 1 (7d shift)
+		child_w0 = get_mrp_entry_by_item_week("TEST-NET-COMBINED-CHILD", test_start_day)
+		child_w1 = get_mrp_entry_by_item_week("TEST-NET-COMBINED-CHILD", add_days(test_start_day, 7))
+		self.assertEqual(child_w0.upstream_net_demand, 10)
+		self.assertEqual(child_w1.upstream_net_demand or 0, 0)
+
+	def test_forecast_only_mode_children_receive_no_suggested_receipts(self, mock_date):
+		"""
+		Under requirement_based_on = "Forecast only", upstream_net_demand is written to the child
+		(via open_orders) but is ignored when computing demand. A child with no direct forecast
+		gets zero suggested_receipts. Documents the intentional behaviour of "Forecast only" mode.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.requirement_based_on = "Forecast only"
+		self.mrp_settings.save()
+
+		create_mrp_forecast(
+			{"item_code": "TEST-NET-PARENT", "forecast_date": test_start_day, "forecast_quantity": 10}
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
+		self.assertEqual(child_entry.upstream_net_demand, 20)  # demand was written...
+		self.assertEqual(child_entry.open_orders, 20)  # ...and flows into open_orders...
+		self.assertEqual(child_entry.total_forecast_demand or 0, 0)
+		self.assertEqual(child_entry.suggested_receipts or 0, 0)  # ...but ignored under Forecast only
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
