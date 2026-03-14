@@ -152,7 +152,7 @@ scheduler_events = {
 	# "all": [
 	# 	"erpnext_mrp.tasks.all"
 	# ],
-	"daily": ["erpnext_mrp.mrp.tasks.mrp_run.mrp_run"],
+	"daily_long": ["erpnext_mrp.mrp.tasks.mrp_run.mrp_run"],
 	# "hourly": [
 	# 	"erpnext_mrp.tasks.hourly"
 	# ],

@@ -30,11 +30,10 @@
   "open_orders",
   "reserved_qty",
   "reserved_qty_for_production",
-  "upstream_so_demand",
   "forecast_demand_section",
   "total_forecast_demand",
   "forecast_demand",
-  "upstream_forecast_demand",
+  "upstream_net_demand",
   "scheduled_receipts_section",
   "scheduled_receipts",
   "planned_qty",
@@ -212,16 +211,10 @@
    "label": "Ordered Qty"
   },
   {
-   "description": "Upstream Sales Order Demand based on BOM",
-   "fieldname": "upstream_so_demand",
+   "description": "Net production demand exploded from parent items (based on parent suggested_receipts, not gross forecast/SO)",
+   "fieldname": "upstream_net_demand",
    "fieldtype": "Float",
-   "label": "Upstream Sales Order Demand"
-  },
-  {
-   "description": "Upstream Forecast Demand based on BOM",
-   "fieldname": "upstream_forecast_demand",
-   "fieldtype": "Float",
-   "label": "Upstream Forecast Demand"
+   "label": "Upstream Net Demand"
   },
   {
    "description": "For final products: Total qty that is Forcasted for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period\n<br>\nFor purchase items: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period\n<br><br>\n<code>Forecast Demand + Upstream Forecast Demand</code>",
@@ -375,7 +368,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-13 12:27:13.331477",
+ "modified": "2026-03-14 15:38:35.455957",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",
