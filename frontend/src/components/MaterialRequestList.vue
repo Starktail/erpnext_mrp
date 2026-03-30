@@ -82,8 +82,8 @@
             >
           </p>
           <p>
-            Once the job is complete, you can reload this page to see the
-            updated results.
+            This page will automatically refresh when the calculations are
+            complete.
           </p>
         </div>
       </template>
@@ -216,7 +216,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, nextTick, h, onMounted } from 'vue'
+import {
+  ref,
+  reactive,
+  computed,
+  watch,
+  nextTick,
+  h,
+  onMounted,
+  onUnmounted,
+} from 'vue'
 import { NDataTable, NInput, NInputNumber, NSpace } from 'naive-ui'
 import {
   Button,
@@ -407,9 +416,20 @@ const treeData = ref([])
 const scrollX = ref(2500)
 const loadingRef = ref(true)
 
+const mrpRunCompleteHandler = () => {
+  toast.success('MRP data refreshed')
+  executeAsyncQuery()
+  last_mrp_run.reload()
+}
+
 onMounted(async () => {
   executeAsyncQuery()
   checkForecastCoverage()
+  window.frappe?.realtime?.on('mrp_run_complete', mrpRunCompleteHandler)
+})
+
+onUnmounted(() => {
+  window.frappe?.realtime?.off('mrp_run_complete', mrpRunCompleteHandler)
 })
 
 const mrp_settings = createDocumentResource({

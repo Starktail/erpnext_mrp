@@ -769,6 +769,7 @@ def _finalise_item_batch(
 	item_prices: dict[str, float],
 	supplier_payment_terms: dict[str, str],
 	payment_term_details: dict[str, frappe._dict],
+	total_batches: int = 1,
 ) -> None:
 	grouped_mrp_entries = _fetch_grouped_mrp_entries(item_codes)
 
@@ -945,6 +946,17 @@ def _finalise_item_batch(
 			)
 			entry.save()
 
+	if total_batches > 1:
+		try:
+			remaining = frappe.cache().redis_client.decr("mrp_batch_pending")
+		except Exception:
+			remaining = 0
+		if remaining <= 0:
+			frappe.cache().delete_key("mrp_batch_pending")
+			_publish_mrp_run_complete()
+	else:
+		_publish_mrp_run_complete()
+
 
 def _calculate_totals_for_level(level: int) -> None:
 	frappe.db.sql(
@@ -1073,6 +1085,11 @@ def _finalise_suggestions(
 
 	batch_size = 250
 	all_item_details = list(item_details_map.values())
+	total_batches = math.ceil(len(all_item_details) / batch_size) if all_item_details else 1
+
+	if enqueue and total_batches > 1:
+		frappe.cache().set_value("mrp_batch_pending", total_batches)
+
 	for i in range(0, len(all_item_details), batch_size):
 		batch = all_item_details[i : i + batch_size]
 		batch_codes = [item["item_code"] for item in batch]
@@ -1087,6 +1104,7 @@ def _finalise_suggestions(
 				item_prices=item_prices,
 				supplier_payment_terms=supplier_payment_terms,
 				payment_term_details=payment_term_details,
+				total_batches=total_batches,
 			)
 		else:
 			_finalise_item_batch(
@@ -1096,7 +1114,11 @@ def _finalise_suggestions(
 				item_prices=item_prices,
 				supplier_payment_terms=supplier_payment_terms,
 				payment_term_details=payment_term_details,
+				total_batches=total_batches,
 			)
+
+	if not enqueue:
+		_publish_mrp_run_complete()
 
 
 def _process_levels_sequentially(enqueue: bool) -> None:
@@ -1146,3 +1168,18 @@ def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
 			item_prices[d.item_code] = d.price_list_rate
 
 	return item_prices
+
+
+def _publish_mrp_run_complete() -> None:
+	"""Notify all users with an MRP role so the Vue UI can refresh its data."""
+	import datetime
+
+	message = {"completed_at": datetime.datetime.now().isoformat()}
+	users = frappe.get_all(
+		"Has Role",
+		filters={"role": ["in", ["MRP Manager", "MRP User"]], "parenttype": "User"},
+		pluck="parent",
+		distinct=True,
+	)
+	for user in users:
+		frappe.publish_realtime(event="mrp_run_complete", message=message, user=user)
