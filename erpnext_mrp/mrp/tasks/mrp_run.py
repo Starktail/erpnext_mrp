@@ -1171,10 +1171,15 @@ def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
 
 
 def _publish_mrp_run_complete() -> None:
-	"""Broadcast a realtime event to all connected sessions so the Vue UI can refresh."""
+	"""Notify all users with an MRP role so the Vue UI can refresh its data."""
 	import datetime
 
-	frappe.publish_realtime(
-		event="mrp_run_complete",
-		message={"completed_at": datetime.datetime.now().isoformat()},
+	message = {"completed_at": datetime.datetime.now().isoformat()}
+	users = frappe.get_all(
+		"Has Role",
+		filters={"role": ["in", ["MRP Manager", "MRP User"]], "parenttype": "User"},
+		pluck="parent",
+		distinct=True,
 	)
+	for user in users:
+		frappe.publish_realtime(event="mrp_run_complete", message=message, user=user)
