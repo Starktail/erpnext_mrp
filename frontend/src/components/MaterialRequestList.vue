@@ -449,7 +449,7 @@ function renderColumnTitle(label, columnKey) {
   ])
 }
 
-const sorterRef = ref(null)
+const sorterRef = ref({ columnKey: 'days_to_reorder', order: 'ascend' })
 
 const paginationReactive = reactive({
   page: 1,
@@ -848,6 +848,7 @@ const columns = computed(() => {
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
+      defaultSortOrder: 'ascend',
       filter: true,
       filterOptionValue:
         appliedNumberFilters.days_to_reorder.min !== null ||
