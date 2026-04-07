@@ -249,6 +249,9 @@ const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
 const showForecastWarning = ref(false)
+const currentStockLevels = ref({})
+const stockSyncLoading = ref(false)
+const SYNC_EPSILON = 0.001
 const forecastWarningData = reactive({
   weeks_short: 0,
   max_forecast_date: null,
@@ -433,6 +436,32 @@ function renderNumberFilter(columnKey) {
   }
 }
 
+async function checkStockSync(itemCodes) {
+  if (!itemCodes.length) return
+  stockSyncLoading.value = true
+  try {
+    currentStockLevels.value = await call(
+      'erpnext_mrp.api.get_current_stock_levels',
+      { item_codes: JSON.stringify(itemCodes) },
+    )
+  } catch (e) {
+    console.warn('Stock sync check failed:', e)
+  }
+  stockSyncLoading.value = false
+}
+
+function isOutOfSync(row) {
+  if (row.type !== 'HEADER') return false
+  const current = currentStockLevels.value[row.item_code]
+  if (current === undefined) return false
+  return Math.abs(current - (row.on_hand_inventory ?? 0)) > SYNC_EPSILON
+}
+
+function syncDelta(row) {
+  const current = currentStockLevels.value[row.item_code] ?? 0
+  return current - (row.on_hand_inventory ?? 0)
+}
+
 const EXCLUDE_CHIP_STYLE = {
   color: '#c0392b',
   fontSize: '10px',
@@ -464,6 +493,7 @@ const scrollX = ref(2500)
 const loadingRef = ref(true)
 
 const mrpRunCompleteHandler = () => {
+  currentStockLevels.value = {}
   toast.success('MRP data refreshed')
   executeAsyncQuery()
   last_mrp_run.reload()
@@ -697,7 +727,7 @@ const columns = computed(() => {
       className: 'item-code-column',
       render: (row) => {
         if (row.type === 'HEADER') {
-          return h(
+          const link = h(
             'a',
             {
               href: `/app/item/${row.item_code}`,
@@ -705,6 +735,38 @@ const columns = computed(() => {
               class: 'text-blue-600 hover:underline',
             },
             row.item_code,
+          )
+          if (!isOutOfSync(row)) return link
+          const delta = syncDelta(row)
+          const sign = delta > 0 ? '+' : ''
+          const stored = row.on_hand_inventory ?? 0
+          const current = currentStockLevels.value[row.item_code]
+          return h(
+            'span',
+            {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+              },
+            },
+            [
+              link,
+              h(
+                'span',
+                {
+                  title: `Stock changed since last MRP run: was ${stored}, now ${current} (${sign}${delta.toFixed(
+                    2,
+                  )})`,
+                  style: {
+                    color: '#e67e22',
+                    cursor: 'default',
+                    fontSize: '13px',
+                  },
+                },
+                '⚠',
+              ),
+            ],
           )
         }
         const isSelected = row.measure_key === closed_column_field.value
@@ -1192,6 +1254,7 @@ async function executeAsyncQuery() {
       })
       return row
     })
+    checkStockSync(items.map((i) => i.item_code))
   } catch (e) {
     console.error(e)
     toast.error('Failed to fetch MRP entries')
