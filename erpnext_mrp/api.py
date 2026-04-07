@@ -5,7 +5,7 @@ from frappe.config import get_modules_from_all_apps_for_user
 
 
 @frappe.whitelist()
-def get_current_stock_levels(item_codes) -> dict[str, float]:
+def get_current_stock_levels(item_codes: list[str] | str) -> dict[str, float]:
 	codes: list[str] = json.loads(item_codes) if isinstance(item_codes, str) else item_codes
 	if not codes:
 		return {}
