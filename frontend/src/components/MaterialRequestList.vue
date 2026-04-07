@@ -249,6 +249,9 @@ const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
 const showForecastWarning = ref(false)
+const currentStockLevels = ref({})
+const stockSyncLoading = ref(false)
+const SYNC_EPSILON = 0.001
 const forecastWarningData = reactive({
   weeks_short: 0,
   max_forecast_date: null,
@@ -272,6 +275,22 @@ const appliedTextFilters = reactive({
   default_supplier: '',
 })
 
+const excludeFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
+})
+
+const appliedExcludeFilters = reactive({
+  item_code: '',
+  item_name: '',
+  item_group: '',
+  bom_list: '',
+  default_supplier: '',
+})
+
 const numberFilters = reactive({
   reorder_level: { min: null, max: null },
   reorder_quantity: { min: null, max: null },
@@ -288,39 +307,59 @@ const appliedNumberFilters = reactive({
   days_to_reorder_excl_reorder_level: { min: null, max: null },
 })
 
+const LABEL_STYLE = { marginBottom: '4px', fontSize: '11px', color: '#888' }
+
+function commitTextFilter(columnKey, hide) {
+  appliedTextFilters[columnKey] = textFilters[columnKey]
+  appliedExcludeFilters[columnKey] = excludeFilters[columnKey]
+  paginationReactive.page = 1
+  executeAsyncQuery()
+  hide()
+}
+
+function clearTextFilter(columnKey, hide) {
+  textFilters[columnKey] = ''
+  appliedTextFilters[columnKey] = ''
+  excludeFilters[columnKey] = ''
+  appliedExcludeFilters[columnKey] = ''
+  paginationReactive.page = 1
+  executeAsyncQuery()
+  hide()
+}
+
 function renderTextFilter(columnKey, placeholder) {
   return ({ hide }) => {
-    return h('div', { style: { padding: '8px', width: '250px' } }, [
+    return h('div', { style: { padding: '8px', width: '280px' } }, [
+      h('div', { style: LABEL_STYLE }, 'Include (contains)'),
       h(NInput, {
         value: textFilters[columnKey],
         'onUpdate:value': (v) => {
           textFilters[columnKey] = v
         },
-        placeholder: placeholder,
+        placeholder,
         size: 'small',
         style: { marginBottom: '8px' },
         onKeyup: (e) => {
-          if (e.key === 'Enter') {
-            appliedTextFilters[columnKey] = textFilters[columnKey]
-            paginationReactive.page = 1
-            executeAsyncQuery()
-            hide()
-          }
+          if (e.key === 'Enter') commitTextFilter(columnKey, hide)
+        },
+      }),
+      h('div', { style: LABEL_STYLE }, 'Exclude (not contains)'),
+      h(NInput, {
+        value: excludeFilters[columnKey],
+        'onUpdate:value': (v) => {
+          excludeFilters[columnKey] = v
+        },
+        placeholder: `Exclude ${placeholder.replace('Search ', '')}`,
+        size: 'small',
+        style: { marginBottom: '8px' },
+        onKeyup: (e) => {
+          if (e.key === 'Enter') commitTextFilter(columnKey, hide)
         },
       }),
       h(NSpace, { justify: 'end' }, () => [
         h(
           Button,
-          {
-            size: 'sm',
-            onClick: () => {
-              textFilters[columnKey] = ''
-              appliedTextFilters[columnKey] = ''
-              paginationReactive.page = 1
-              executeAsyncQuery()
-              hide()
-            },
-          },
+          { size: 'sm', onClick: () => clearTextFilter(columnKey, hide) },
           () => 'Clear',
         ),
         h(
@@ -328,12 +367,7 @@ function renderTextFilter(columnKey, placeholder) {
           {
             size: 'sm',
             variant: 'solid',
-            onClick: () => {
-              appliedTextFilters[columnKey] = textFilters[columnKey]
-              paginationReactive.page = 1
-              executeAsyncQuery()
-              hide()
-            },
+            onClick: () => commitTextFilter(columnKey, hide),
           },
           () => 'Search',
         ),
@@ -402,7 +436,49 @@ function renderNumberFilter(columnKey) {
   }
 }
 
-const sorterRef = ref(null)
+async function checkStockSync(itemCodes) {
+  if (!itemCodes.length) return
+  stockSyncLoading.value = true
+  try {
+    currentStockLevels.value = await call(
+      'erpnext_mrp.api.get_current_stock_levels',
+      { item_codes: JSON.stringify(itemCodes) },
+    )
+  } catch (e) {
+    console.warn('Stock sync check failed:', e)
+  }
+  stockSyncLoading.value = false
+}
+
+function isOutOfSync(row) {
+  if (row.type !== 'HEADER') return false
+  const current = currentStockLevels.value[row.item_code]
+  if (current === undefined) return false
+  return Math.abs(current - (row.on_hand_inventory ?? 0)) > SYNC_EPSILON
+}
+
+function syncDelta(row) {
+  const current = currentStockLevels.value[row.item_code] ?? 0
+  return current - (row.on_hand_inventory ?? 0)
+}
+
+const EXCLUDE_CHIP_STYLE = {
+  color: '#c0392b',
+  fontSize: '10px',
+  marginLeft: '4px',
+  fontWeight: 'normal',
+}
+
+function renderColumnTitle(label, columnKey) {
+  return h('span', {}, [
+    label,
+    appliedExcludeFilters[columnKey]
+      ? h('span', { style: EXCLUDE_CHIP_STYLE }, 'x excl')
+      : null,
+  ])
+}
+
+const sorterRef = ref({ columnKey: 'days_to_reorder', order: 'ascend' })
 
 const paginationReactive = reactive({
   page: 1,
@@ -417,6 +493,7 @@ const scrollX = ref(2500)
 const loadingRef = ref(true)
 
 const mrpRunCompleteHandler = () => {
+  currentStockLevels.value = {}
   toast.success('MRP data refreshed')
   executeAsyncQuery()
   last_mrp_run.reload()
@@ -638,10 +715,11 @@ const columns = computed(() => {
       fixed: 'left',
     },
     {
-      title: 'Item Code / Measure',
+      title: () => renderColumnTitle('Item Code / Measure', 'item_code'),
       key: 'item_code',
       filter: true,
-      filterOptionValue: appliedTextFilters.item_code || null,
+      filterOptionValue:
+        appliedTextFilters.item_code || appliedExcludeFilters.item_code || null,
       renderFilterMenu: renderTextFilter('item_code', 'Search Item Code'),
       fixed: 'left',
       width: 400,
@@ -649,7 +727,7 @@ const columns = computed(() => {
       className: 'item-code-column',
       render: (row) => {
         if (row.type === 'HEADER') {
-          return h(
+          const link = h(
             'a',
             {
               href: `/app/item/${row.item_code}`,
@@ -657,6 +735,38 @@ const columns = computed(() => {
               class: 'text-blue-600 hover:underline',
             },
             row.item_code,
+          )
+          if (!isOutOfSync(row)) return link
+          const delta = syncDelta(row)
+          const sign = delta > 0 ? '+' : ''
+          const stored = row.on_hand_inventory ?? 0
+          const current = currentStockLevels.value[row.item_code]
+          return h(
+            'span',
+            {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+              },
+            },
+            [
+              link,
+              h(
+                'span',
+                {
+                  title: `Stock changed since last MRP run: was ${stored}, now ${current} (${sign}${delta.toFixed(
+                    2,
+                  )})`,
+                  style: {
+                    color: '#e67e22',
+                    cursor: 'default',
+                    fontSize: '13px',
+                  },
+                },
+                '⚠',
+              ),
+            ],
           )
         }
         const isSelected = row.measure_key === closed_column_field.value
@@ -668,10 +778,11 @@ const columns = computed(() => {
       },
     },
     {
-      title: 'Item Name',
+      title: () => renderColumnTitle('Item Name', 'item_name'),
       key: 'item_name',
       filter: true,
-      filterOptionValue: appliedTextFilters.item_name || null,
+      filterOptionValue:
+        appliedTextFilters.item_name || appliedExcludeFilters.item_name || null,
       renderFilterMenu: renderTextFilter('item_name', 'Search Item Name'),
       fixed: 'left',
       width: 200,
@@ -682,10 +793,13 @@ const columns = computed(() => {
       render: (row) => (row.type === 'HEADER' ? row.item_name : ''),
     },
     {
-      title: 'Item Group',
+      title: () => renderColumnTitle('Item Group', 'item_group'),
       key: 'item_group',
       filter: true,
-      filterOptionValue: appliedTextFilters.item_group || null,
+      filterOptionValue:
+        appliedTextFilters.item_group ||
+        appliedExcludeFilters.item_group ||
+        null,
       renderFilterMenu: renderTextFilter('item_group', 'Search Item Group'),
       width: 120,
       ellipsis: {
@@ -706,10 +820,11 @@ const columns = computed(() => {
       render: (row) => (row.type === 'HEADER' ? row.uom : ''),
     },
     {
-      title: 'BOM',
+      title: () => renderColumnTitle('BOM', 'bom_list'),
       key: 'bom_list',
       filter: true,
-      filterOptionValue: appliedTextFilters.bom_list || null,
+      filterOptionValue:
+        appliedTextFilters.bom_list || appliedExcludeFilters.bom_list || null,
       renderFilterMenu: renderTextFilter('bom_list', 'Search BOM'),
       width: 150,
       ellipsis: {
@@ -771,10 +886,13 @@ const columns = computed(() => {
       render: (row) => (row.type === 'HEADER' ? formatTime(row.lead_time) : ''),
     },
     {
-      title: 'Supplier',
+      title: () => renderColumnTitle('Supplier', 'default_supplier'),
       key: 'default_supplier',
       filter: true,
-      filterOptionValue: appliedTextFilters.default_supplier || null,
+      filterOptionValue:
+        appliedTextFilters.default_supplier ||
+        appliedExcludeFilters.default_supplier ||
+        null,
       renderFilterMenu: renderTextFilter('default_supplier', 'Search Supplier'),
       width: 120,
       ellipsis: {
@@ -792,6 +910,7 @@ const columns = computed(() => {
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
+      defaultSortOrder: 'ascend',
       filter: true,
       filterOptionValue:
         appliedNumberFilters.days_to_reorder.min !== null ||
@@ -945,6 +1064,32 @@ async function executeAsyncQuery() {
           key,
           'like',
           `%${appliedTextFilters[key]}%`,
+        ])
+      }
+    }
+  })
+
+  Object.keys(appliedExcludeFilters).forEach((key) => {
+    if (appliedExcludeFilters[key]) {
+      if (key === 'default_supplier') {
+        backendFilters.push([
+          'MRP Entry',
+          'default_supplier',
+          'not like',
+          `%${appliedExcludeFilters[key]}%`,
+        ])
+        backendFilters.push([
+          'MRP Entry',
+          'default_supplier_name',
+          'not like',
+          `%${appliedExcludeFilters[key]}%`,
+        ])
+      } else {
+        backendFilters.push([
+          'MRP Entry',
+          key,
+          'not like',
+          `%${appliedExcludeFilters[key]}%`,
         ])
       }
     }
@@ -1109,6 +1254,7 @@ async function executeAsyncQuery() {
       })
       return row
     })
+    checkStockSync(items.map((i) => i.item_code))
   } catch (e) {
     console.error(e)
     toast.error('Failed to fetch MRP entries')
@@ -1224,6 +1370,8 @@ function clearFilters() {
   Object.keys(textFilters).forEach((k) => {
     textFilters[k] = ''
     appliedTextFilters[k] = ''
+    excludeFilters[k] = ''
+    appliedExcludeFilters[k] = ''
   })
   Object.keys(numberFilters).forEach((k) => {
     numberFilters[k].min = null
