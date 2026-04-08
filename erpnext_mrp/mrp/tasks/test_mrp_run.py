@@ -1935,3 +1935,305 @@ class TestGetForecastCoverageStatus(FrappeTestCase):
 
 		self.assertTrue(result["covered"])
 		self.assertEqual(result["weeks_short"], 0)
+
+
+@patch("erpnext_mrp.mrp.tasks.mrp_run.date")
+class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
+	"""
+	Verifies that scheduled_receipts_value_payable uses actual PO dates instead of
+	lead-time back-calculation when payment term custom_due_date is set.
+	"""
+
+	ITEM_CODE = "TEST-SRPD-01"
+	SUPPLIER_NAME = "_Test Supplier SRPD"
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		create_custom_field(
+			"Purchase Order Item",
+			dict(
+				fieldname="custom_expected_arrival_date",
+				label="Expected Arrival Date",
+				fieldtype="Date",
+			),
+		)
+
+	@classmethod
+	def tearDownClass(cls):
+		if frappe.db.exists("Custom Field", "Purchase Order Item-custom_expected_arrival_date"):
+			frappe.delete_doc("Custom Field", "Purchase Order Item-custom_expected_arrival_date", force=True)
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("MRP Entry")
+		frappe.db.delete("Purchase Order")
+		frappe.db.delete("Item", {"name": self.ITEM_CODE})
+
+		_ensure_payment_terms_for_actual_dates()
+
+		if not frappe.db.exists("Supplier", self.SUPPLIER_NAME):
+			supplier = frappe.new_doc("Supplier")
+			supplier.supplier_name = self.SUPPLIER_NAME
+			supplier.supplier_type = "Company"
+			supplier.insert(ignore_permissions=True)
+
+		if not frappe.db.exists("MRP Settings", "MRP Settings"):
+			mrp_settings = frappe.new_doc("MRP Settings")
+		else:
+			mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.look_ahead = 11
+		mrp_settings.periods_type = "Calendar Week"
+		mrp_settings.requirement_based_on = "Open Orders + Forecast"
+		mrp_settings.item_lead_time_field = "lead_time_days | Lead Time in days"
+		mrp_settings.item_additional_lead_time_field = ""
+		mrp_settings.po_item_delivery_date_field = "custom_expected_arrival_date | Expected Arrival Date"
+		mrp_settings.assume_remaining_qty = 1
+		mrp_settings.save()
+
+		item = create_item(self.ITEM_CODE, "SRPD Test Item", "Raw Material", lead_time_days=0)
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = self.SUPPLIER_NAME
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+	def tearDown(self):
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.po_item_delivery_date_field = ""
+		mrp_settings.assume_remaining_qty = 0
+		mrp_settings.save()
+		super().tearDown()
+
+	def _make_supplier(self, payment_terms_template: str) -> None:
+		frappe.db.set_value("Supplier", self.SUPPLIER_NAME, "payment_terms", payment_terms_template)
+
+	def _make_po(
+		self,
+		transaction_date: datetime.date,
+		schedule_date: datetime.date,
+		custom_expected_arrival_date: datetime.date | None,
+		qty: int = 10,
+		rate: float = 100.0,
+	):
+		po = frappe.new_doc("Purchase Order")
+		po.company = "_Test Company"
+		po.supplier = self.SUPPLIER_NAME
+		po.currency = "ZAR"
+		po.transaction_date = transaction_date
+		po.schedule_date = schedule_date
+		po.append(
+			"items",
+			{
+				"item_code": self.ITEM_CODE,
+				"warehouse": "_Test Warehouse - _TC",
+				"schedule_date": schedule_date,
+				"qty": qty,
+				"rate": rate,
+				"custom_expected_arrival_date": custom_expected_arrival_date,
+			},
+		)
+		po.insert(ignore_permissions=True)
+		po.submit()
+		return po
+
+	def test_order_date_term_uses_po_transaction_date(self, mock_date):
+		"""
+		When custom_due_date == "Order date", the payment due date must be calculated
+		from the actual po.transaction_date, not from the arrival-week bucket.
+
+		PO transaction_date = W1, schedule_date = W3, arrival = W5, term = "Order date" + 0 days.
+		Expected: payable lands in W1, not W5.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+		w5 = test_start + datetime.timedelta(weeks=4)
+
+		self._make_supplier("_Test Payment Term based on Order Date")
+		self._make_po(transaction_date=w1, schedule_date=w3, custom_expected_arrival_date=w5)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w5_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w5)
+
+		self.assertGreater(
+			w1_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payment obligation must appear in the order-date week (W1)",
+		)
+		self.assertEqual(
+			w5_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Arrival week must carry no payable when term is 'Order date'",
+		)
+
+	def test_shipment_date_term_uses_po_schedule_date(self, mock_date):
+		"""
+		When custom_due_date == "Shipment date", the payment due date must be calculated
+		from the actual po_item.schedule_date (ETD), not lead-time back-calculation.
+
+		PO transaction_date = W1, schedule_date = W3, arrival = W5, term = "Shipment date" + 0 days.
+		Expected: payable lands in W3.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+		w5 = test_start + datetime.timedelta(weeks=4)
+
+		self._make_supplier("_Test Payment Term based on Shipment Date")
+		self._make_po(transaction_date=w1, schedule_date=w3, custom_expected_arrival_date=w5)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+		w5_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w5)
+
+		self.assertGreater(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payment obligation must appear in the shipment-date week (W3)",
+		)
+		self.assertEqual(w1_entry.scheduled_receipts_value_payable or 0, 0)
+		self.assertEqual(w5_entry.scheduled_receipts_value_payable or 0, 0)
+
+	def test_arrival_date_term_uses_po_custom_expected_arrival_date(self, mock_date):
+		"""
+		When custom_due_date == "Arrival date", the payment due date must be calculated
+		from po_item.custom_expected_arrival_date.
+
+		PO transaction_date = W1, schedule_date = W3, arrival = W5, term = "Arrival date" + 0 days.
+		Expected: payable lands in W5.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+		w5 = test_start + datetime.timedelta(weeks=4)
+
+		self._make_supplier("_Test Payment Term based on Arrival Date")
+		self._make_po(transaction_date=w1, schedule_date=w3, custom_expected_arrival_date=w5)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+		w5_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w5)
+
+		self.assertGreater(
+			w5_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payment obligation must appear in the arrival-date week (W5)",
+		)
+		self.assertEqual(w1_entry.scheduled_receipts_value_payable or 0, 0)
+		self.assertEqual(w3_entry.scheduled_receipts_value_payable or 0, 0)
+
+	def test_missing_eta_falls_back_to_etd(self, mock_date):
+		"""
+		When custom_expected_arrival_date is NULL and the term is "Arrival date",
+		the code falls back to schedule_date (ETD). Payable must land in the ETD week.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+
+		self._make_supplier("_Test Payment Term based on Arrival Date")
+		self._make_po(transaction_date=w1, schedule_date=w3, custom_expected_arrival_date=None)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+
+		self.assertGreater(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"When ETA is absent, payable must fall back to the ETD week (W3)",
+		)
+		self.assertEqual(w1_entry.scheduled_receipts_value_payable or 0, 0)
+
+
+def _ensure_payment_terms_for_actual_dates():
+	from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_term
+
+	create_payment_term("_Test Payment Term based on Order Date")
+	frappe.db.set_value(
+		"Payment Term", "_Test Payment Term based on Order Date", "custom_due_date", "Order date"
+	)
+
+	if not frappe.db.exists("Payment Terms Template", "_Test Payment Term based on Order Date"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test Payment Term based on Order Date",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test Payment Term based on Order Date",
+						"invoice_portion": 100.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+				],
+			}
+		).insert()
+
+	create_payment_term("_Test Payment Term based on Shipment Date")
+	frappe.db.set_value(
+		"Payment Term", "_Test Payment Term based on Shipment Date", "custom_due_date", "Shipment date"
+	)
+
+	if not frappe.db.exists("Payment Terms Template", "_Test Payment Term based on Shipment Date"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test Payment Term based on Shipment Date",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test Payment Term based on Shipment Date",
+						"invoice_portion": 100.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+				],
+			}
+		).insert()
+
+	create_payment_term("_Test Payment Term based on Arrival Date")
+	frappe.db.set_value(
+		"Payment Term", "_Test Payment Term based on Arrival Date", "custom_due_date", "Arrival date"
+	)
+
+	if not frappe.db.exists("Payment Terms Template", "_Test Payment Term based on Arrival Date"):
+		frappe.get_doc(
+			{
+				"doctype": "Payment Terms Template",
+				"template_name": "_Test Payment Term based on Arrival Date",
+				"terms": [
+					{
+						"doctype": "Payment Terms Template Detail",
+						"payment_term": "_Test Payment Term based on Arrival Date",
+						"invoice_portion": 100.00,
+						"credit_days_based_on": "Day(s) after invoice date",
+						"credit_days": 0,
+					},
+				],
+			}
+		).insert()
