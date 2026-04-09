@@ -1583,6 +1583,51 @@ class TestMRPRun(FrappeTestCase):
 		self.assertEqual(child_entry.total_forecast_demand or 0, 0)
 		self.assertEqual(child_entry.suggested_receipts or 0, 0)  # ...but ignored under Forecast only
 
+	def test_on_hand_inventory_wrong_when_stock_transaction_on_today(self, mock_date):
+		"""
+		Regression: on_hand_inventory, on_hand_inventory_excl_reorder_level, and
+		on_hand_inventory_no_action were all sourced from opening_qty of the stock balance
+		report (from_date = to_date = today).
+		This test demonstrates the bug: 50 units are received on today's date, so the MRP
+		opening stock for the item should be 50.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-SOH-TODAY", "SOH Today Item", "Raw Material", lead_time_days=0)
+
+		self.mrp_settings.item_condition = "doc.item_code == 'TEST-SOH-TODAY'"
+		self.mrp_settings.save()
+
+		# Stock entry posted ON today (not yesterday)
+		make_stock_entry(
+			item_code="TEST-SOH-TODAY",
+			posting_date=test_start_day,
+			qty=50,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-SOH-TODAY", "is_header": 1},
+			fields=[
+				"on_hand_inventory",
+				"on_hand_inventory_excl_reorder_level",
+				"on_hand_inventory_no_action",
+			],
+		)
+		self.assertEqual(len(header), 1)
+
+		# All three fields should reflect the 50 units received today.
+		self.assertEqual(header[0].on_hand_inventory, 50)
+		self.assertEqual(header[0].on_hand_inventory_excl_reorder_level, 50)
+		self.assertEqual(header[0].on_hand_inventory_no_action, 50)
+
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
 	isodate = demand_date.isocalendar()
