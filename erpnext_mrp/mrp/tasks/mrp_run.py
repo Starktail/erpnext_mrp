@@ -688,7 +688,7 @@ def _calculate_suggested_receipts_batch(
 		item_details = item_details_map.get(item_code)
 
 		mrp_entry_docs[0].on_hand_inventory = sum(
-			sl.opening_qty for sl in stock_levels if sl.item_code == item_code
+			sl.bal_qty for sl in stock_levels if sl.item_code == item_code
 		)
 		mrp_entry_docs[0].on_hand_inventory_excl_reorder_level = mrp_entry_docs[0].on_hand_inventory
 		mrp_entry_docs[0].on_hand_inventory_no_action = mrp_entry_docs[0].on_hand_inventory
