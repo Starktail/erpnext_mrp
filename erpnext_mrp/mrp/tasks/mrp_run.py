@@ -708,18 +708,21 @@ def _calculate_suggested_receipts_batch(
 				entry.default_supplier = item_details.get("default_supplier")
 
 			open_orders = entry.open_orders or 0
-			total_forecast_demand = entry.total_forecast_demand or 0
+			forecast_demand = entry.forecast_demand or 0
+			upstream_net_demand = entry.upstream_net_demand or 0
 
 			if requirement_based_on == "Forecast only":
-				demand = total_forecast_demand
+				demand = forecast_demand
 			elif requirement_based_on == "Open Orders only":
 				demand = open_orders
 			elif requirement_based_on == "Open Orders + Forecast":
-				demand = open_orders + total_forecast_demand
+				demand = open_orders + forecast_demand
 			elif requirement_based_on == "Open Orders + Forecast (orders consume the forecast)":
-				demand = open_orders + max(0, total_forecast_demand - open_orders)
+				demand = open_orders + max(0, forecast_demand - open_orders)
 			else:
 				raise ValueError(_("Unkown 'Requirement based on' setting"))
+
+			demand += upstream_net_demand
 
 			entry.suggested_receipts = 0
 			shortage = (
@@ -1024,9 +1027,8 @@ def _calculate_totals_for_level(level: int) -> None:
         UPDATE `tabMRP Entry`
         SET
             open_orders = COALESCE(reserved_qty, 0)
-                        + COALESCE(reserved_qty_for_production, 0)
-                        + COALESCE(upstream_net_demand, 0),
-            total_forecast_demand = COALESCE(forecast_demand, 0),
+                        + COALESCE(reserved_qty_for_production, 0),
+            total_forecast_demand = COALESCE(forecast_demand, 0) + COALESCE(upstream_net_demand, 0),
             scheduled_receipts = COALESCE(planned_qty, 0) + COALESCE(ordered_qty, 0)
         WHERE bom_level = %(level)s
         """,

@@ -1553,11 +1553,11 @@ class TestMRPRun(FrappeTestCase):
 		self.assertEqual(child_w0.upstream_net_demand, 10)
 		self.assertEqual(child_w1.upstream_net_demand or 0, 0)
 
-	def test_forecast_only_mode_children_receive_no_suggested_receipts(self, mock_date):
+	def test_forecast_only_mode_children_receive_upstream_demand(self, mock_date):
 		"""
-		Under requirement_based_on = "Forecast only", upstream_net_demand is written to the child
-		(via open_orders) but is ignored when computing demand. A child with no direct forecast
-		gets zero suggested_receipts. Documents the intentional behaviour of "Forecast only" mode.
+		Under requirement_based_on = "Forecast only", upstream_net_demand is added to demand
+		unconditionally regardless of mode. A child with no direct forecast still receives
+		suggested_receipts driven by the parent's production need.
 		"""
 		test_start_day = datetime.date(2026, 1, 5)
 		mock_date.today.return_value = test_start_day
@@ -1578,10 +1578,48 @@ class TestMRPRun(FrappeTestCase):
 		process_mrp_item_entries(enqueue=False)
 
 		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
-		self.assertEqual(child_entry.upstream_net_demand, 20)  # demand was written...
-		self.assertEqual(child_entry.open_orders, 20)  # ...and flows into open_orders...
-		self.assertEqual(child_entry.total_forecast_demand or 0, 0)
-		self.assertEqual(child_entry.suggested_receipts or 0, 0)  # ...but ignored under Forecast only
+		self.assertEqual(child_entry.upstream_net_demand, 20)  # explosion wrote 10 x 2
+		self.assertEqual(child_entry.open_orders or 0, 0)  # not in open_orders
+		self.assertEqual(child_entry.forecast_demand or 0, 0)  # no direct forecast
+		self.assertEqual(
+			child_entry.total_forecast_demand, 20
+		)  # forecast_demand(0) + upstream_net_demand(20)
+		self.assertEqual(child_entry.suggested_receipts, 20)  # demand = 0 + 20 → shortage → receipts
+
+	def test_open_orders_only_mode_children_receive_upstream_demand(self, mock_date):
+		"""
+		Under requirement_based_on = "Open Orders only", upstream_net_demand is still added to
+		demand unconditionally. A child with no direct SO or WO demand still receives
+		suggested_receipts when its parent has a production need driven by a Sales Order.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.requirement_based_on = "Open Orders only"
+		self.mrp_settings.save()
+
+		create_sales_order(
+			item_code="TEST-NET-PARENT",
+			qty=10,
+			delivery_date=test_start_day,
+			transaction_date=test_start_day,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		parent_entry = get_mrp_entry_by_item_week("TEST-NET-PARENT", test_start_day)
+		self.assertGreater(parent_entry.suggested_receipts, 0)
+
+		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
+		self.assertEqual(child_entry.upstream_net_demand, parent_entry.suggested_receipts * 2)
+		self.assertEqual(child_entry.open_orders or 0, 0)  # not in open_orders
+		self.assertGreater(child_entry.suggested_receipts, 0)
 
 	def test_on_hand_inventory_wrong_when_stock_transaction_on_today(self, mock_date):
 		"""

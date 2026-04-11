@@ -117,7 +117,7 @@
    "label": "On Hand Inventory (Incl Safety Stock"
   },
   {
-   "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period\n<br><br>\n<code>Reserved Qty + Reserved Qty for Production + Upstream Sales Order Demand</code>",
+   "description": "For final products: Total qty that is on Sales Orders for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by open Work Orders for this period\n<br>\nFor purchase items: Total qty that will be consumed by open Work Orders for this period\n<br><br>\n<code>Reserved Qty + Reserved Qty for Production</code>",
    "fieldname": "open_orders",
    "fieldtype": "Float",
    "label": "Open Orders"
@@ -217,7 +217,7 @@
    "label": "Upstream Net Demand"
   },
   {
-   "description": "For final products: Total qty that is Forcasted for this period\n<br>\nFor sub-assemblies: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period\n<br>\nFor purchase items: Total qty that will be consumed by Forecasted parent items (based on BOM) for this period\n<br><br>\n<code>Forecast Demand + Upstream Forecast Demand</code>",
+   "description": "Total forecast-driven demand at this node: direct MRP Forecast entries for this item, plus net production demand exploded from parent items. Useful for understanding what is driving a component's demand without needing to inspect <code>Open Orders</code>.\n<br><br>\n<code>Forecast Demand + Upstream Net Demand</code>",
    "fieldname": "total_forecast_demand",
    "fieldtype": "Float",
    "label": "Total Forecast Demand"
