@@ -650,6 +650,7 @@ def _get_all_item_details() -> dict[str, frappe._dict]:
             t_item.safety_stock,
             t_item.{reorder_qty_field} AS reorder_quantity,
             t_item.valuation_rate AS fall_back_valuation_rate,
+            t_item.stock_uom,
             {lead_time_expression} AS primary_lead_time,
             {additional_lead_time_expression} AS additional_lead_time,
             id.default_supplier
@@ -1128,7 +1129,13 @@ def _finalise_suggestions(
 	enqueue: bool,
 ) -> None:
 	item_codes = list(item_details_map.keys())
-	item_prices = _get_item_prices(item_codes)
+	item_supplier_map: dict[str, str] = {
+		code: d["default_supplier"] for code, d in item_details_map.items() if d.get("default_supplier")
+	}
+	item_uom_map: dict[str, str] = {
+		code: d["stock_uom"] for code, d in item_details_map.items() if d.get("stock_uom")
+	}
+	item_prices = _get_item_prices(item_codes, item_supplier_map, item_uom_map)
 
 	suppliers = list(
 		set(v["default_supplier"] for v in item_details_map.values() if v.get("default_supplier"))
@@ -1205,31 +1212,136 @@ def _process_levels_sequentially(enqueue: bool) -> None:
 	_finalise_suggestions(stock_levels=stock_levels, item_details_map=item_details_map, enqueue=enqueue)
 
 
-def _get_item_prices(item_codes: list[str]) -> dict[str, float]:
-	today = date.today()
-	ItemPrice = frappe.qb.DocType("Item Price")
+def _get_item_prices(
+	item_codes: list[str],
+	item_supplier_map: dict[str, str],
+	item_uom_map: dict[str, str],
+) -> dict[str, float]:
+	if not item_codes:
+		return {}
 
-	item_prices_docs = (
-		frappe.qb.from_(ItemPrice)
-		.select(ItemPrice.item_code, ItemPrice.price_list_rate, ItemPrice.creation)
-		.where(
-			(ItemPrice.item_code.isin(item_codes))
-			& (ItemPrice.buying == 1)
-			& (ItemPrice.valid_from <= today)
-			& ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull()))
-		)
-		.orderby(ItemPrice.creation, order=Order.desc)
-		# .run(as_dict=True)
+	today = date.today()
+	buying_price_list: str = frappe.db.get_single_value("Buying Settings", "buying_price_list") or ""
+	price_list_currency: str = (
+		frappe.db.get_value("Price List", buying_price_list, "currency") or "" if buying_price_list else ""
 	)
 
-	item_prices_docs = item_prices_docs.run(as_dict=True)
+	ItemPrice = frappe.qb.DocType("Item Price")
+	item_prices: dict[str, tuple[float, str]] = {}
 
-	item_prices = {}
-	for d in item_prices_docs:
-		if d.item_code not in item_prices:
-			item_prices[d.item_code] = d.price_list_rate
+	relevant_suppliers = list(set(item_supplier_map.values()))
+	if relevant_suppliers:
+		supplier_rows = (
+			frappe.qb.from_(ItemPrice)
+			.select(
+				ItemPrice.item_code,
+				ItemPrice.price_list_rate,
+				ItemPrice.currency,
+				ItemPrice.uom,
+				ItemPrice.supplier,
+			)
+			.where(
+				(ItemPrice.item_code.isin(item_codes))
+				& (ItemPrice.buying == 1)
+				& (ItemPrice.supplier.isin(relevant_suppliers))
+				& (ItemPrice.currency == price_list_currency)
+				& (ItemPrice.valid_from <= today)
+				& ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull()))
+			)
+			.orderby(ItemPrice.item_code)
+			.orderby(ItemPrice.valid_from, order=Order.desc)
+			.run(as_dict=True)
+		)
+		for row in supplier_rows:
+			code = row.item_code
+			if item_supplier_map.get(code) == row.supplier and code not in item_prices:
+				item_prices[code] = (row.price_list_rate, row.uom)
 
-	return item_prices
+	remaining = [c for c in item_codes if c not in item_prices]
+	if remaining and buying_price_list:
+		pricelist_rows = (
+			frappe.qb.from_(ItemPrice)
+			.select(
+				ItemPrice.item_code,
+				ItemPrice.price_list_rate,
+				ItemPrice.currency,
+				ItemPrice.uom,
+			)
+			.where(
+				(ItemPrice.item_code.isin(remaining))
+				& (ItemPrice.buying == 1)
+				& (ItemPrice.price_list == buying_price_list)
+				& (ItemPrice.currency == price_list_currency)
+				& (ItemPrice.valid_from <= today)
+				& ((ItemPrice.valid_upto >= today) | (ItemPrice.valid_upto.isnull()))
+			)
+			.orderby(ItemPrice.item_code)
+			.orderby(ItemPrice.valid_from, order=Order.desc)
+			.run(as_dict=True)
+		)
+		for row in pricelist_rows:
+			code = row.item_code
+			if code not in item_prices:
+				item_prices[code] = (row.price_list_rate, row.uom)
+
+	uom_pairs_needed: set[tuple[str, str]] = set()
+	for code, (_rate, price_uom) in item_prices.items():
+		stock_uom = item_uom_map.get(code)
+		if stock_uom and price_uom and price_uom != stock_uom:
+			uom_pairs_needed.add((price_uom, stock_uom))
+
+	conversion_factors = _get_uom_conversion_factors(uom_pairs_needed, item_codes, item_uom_map)
+
+	result: dict[str, float] = {}
+	for code, (rate, price_uom) in item_prices.items():
+		stock_uom = item_uom_map.get(code)
+		if stock_uom and price_uom and price_uom != stock_uom:
+			factor = conversion_factors.get((price_uom, stock_uom))
+			if factor and factor > 0:
+				result[code] = rate / factor
+		else:
+			result[code] = rate
+
+	return result
+
+
+def _get_uom_conversion_factors(
+	pairs: set[tuple[str, str]],
+	item_codes: list[str],
+	item_uom_map: dict[str, str],
+) -> dict[tuple[str, str], float]:
+	if not pairs:
+		return {}
+
+	result: dict[tuple[str, str], float] = {}
+
+	from_uoms = list({p[0] for p in pairs})
+	to_uoms = list({p[1] for p in pairs})
+
+	UomConv = frappe.qb.DocType("UOM Conversion Factor")
+	global_rows = (
+		frappe.qb.from_(UomConv)
+		.select(UomConv.from_uom, UomConv.to_uom, UomConv.value)
+		.where((UomConv.from_uom.isin(from_uoms)) & (UomConv.to_uom.isin(to_uoms)))
+		.run(as_dict=True)
+	)
+	for row in global_rows:
+		result[(row.from_uom, row.to_uom)] = row.value
+
+	UomConvDetail = frappe.qb.DocType("UOM Conversion Detail")
+	item_uom_rows = (
+		frappe.qb.from_(UomConvDetail)
+		.select(UomConvDetail.parent, UomConvDetail.uom, UomConvDetail.conversion_factor)
+		.where(UomConvDetail.parent.isin(item_codes))
+		.run(as_dict=True)
+	)
+	for row in item_uom_rows:
+		code = row.parent
+		stock_uom = item_uom_map.get(code)
+		if stock_uom and (row.uom, stock_uom) in pairs:
+			result[(row.uom, stock_uom)] = row.conversion_factor
+
+	return result
 
 
 def _publish_mrp_run_complete() -> None:
