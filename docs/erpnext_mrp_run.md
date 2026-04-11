@@ -79,7 +79,7 @@ The raw signals are summed into planning totals for all items at the current lev
 
 For each item at this level, the system calculates how much needs to be produced or purchased, period by period, in chronological order:
 
-1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level. For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
+1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
 2. **Net Requirements**: Total demand is determined by the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
 3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
@@ -103,7 +103,11 @@ After all levels have been processed, the system computes the output and action 
 - **Suggested Orders**: Each `Suggested Receipt` is offset backward by the item's lead time to place a `Suggested Order` in the correct earlier period. For example, a suggested receipt in Week 42 for an item with a 2-week lead time generates a suggested order in Week 40.
 - **Days to Reorder**: Calculated for the header period (week 0) only. The system finds the first period with a suggested receipt, works backward by the item's lead time, and computes how many days remain. A positive value means there is still time to act; a negative value means the order is already late. If no shortage is projected across the entire horizon, this field shows `—` to clearly distinguish "no action needed" from `0` (order today). Two variants are calculated: one including the safety stock floor and one excluding it.
 - **Cash Requirements**: Finally, the system projects the financial impact of the plan across three fields.
-    - **Suggested Orders Value**: Calculates the estimated cost of the `Suggested Orders` using the item's buying price list or valuation rate.
+    - **Suggested Orders Value**: Calculates the estimated cost of the `Suggested Orders` using a three-step price lookup:
+        1. **Supplier-specific price** — an `Item Price` record where `supplier` matches the item's default supplier, in the currency of the configured buying price list, with a valid date range.
+        2. **Buying price list** — if no supplier-specific price exists, the most recently valid `Item Price` on the price list configured in **Buying Settings → Buying Price List**, filtered to the correct currency and date range.
+        3. **Valuation rate fallback** — if no `Item Price` is found, the item's average bin valuation rate is used, falling back to `Item.valuation_rate`.
+        Prices in a UoM other than the item's stock UoM are automatically converted using the item's UoM conversion table (or the global UOM Conversion Factor table).
     - **Suggested Orders Payable**: Projects the cash outflow for not-yet-placed orders based on the default Supplier's **Payment Terms**. The due date is calculated relative to the week in which the order would be placed.
     - **Scheduled Receipts Value**: Calculates the base-currency value of open Purchase Order lines due in each period, using `(remaining qty × base_rate)` from each PO line. This reflects committed spend already on order.
     - **Scheduled Receipts Payable**: Projects the cash outflow for open Purchase Orders by processing each PO line individually using its actual dates. The base date for each payment term type is taken directly from the PO:
@@ -132,7 +136,7 @@ The following are the key fields calculated for each item in each period:
 | `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                     |
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
 | **Inventory & Demand**          |                                                                                                                                                                       |
-| `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
+| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) is excluded.                        |
 | `open_orders`                   | Total firm demand for the period: Reserved Qty (Sales Orders) + Reserved Qty for Production (Work Orders) + Upstream Net Demand. |
 | `upstream_net_demand`           | Net demand exploded from parent items at the level above. Written when a parent's `suggested_receipts > 0` and this item appears in the parent's BOM. Accumulated additively from all parents. |
 | `total_forecast_demand`         | Total demand from MRP Forecasts for this item and period.                                                                        |

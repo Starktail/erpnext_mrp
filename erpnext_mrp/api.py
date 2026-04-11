@@ -15,6 +15,9 @@ def get_current_stock_levels(item_codes: list[str] | str) -> dict[str, float]:
 		SELECT item_code, SUM(actual_qty) AS actual_qty
 		FROM tabBin
 		WHERE item_code IN %(codes)s
+		AND warehouse NOT IN (
+			SELECT name FROM `tabWarehouse` WHERE is_rejected_warehouse = 1
+		)
 		GROUP BY item_code
 		""",
 		{"codes": codes},

@@ -462,6 +462,12 @@ function syncDelta(row) {
   return current - (row.on_hand_inventory ?? 0)
 }
 
+function isBomParent(row) {
+  if (!row.bom_list) return false
+  const prefix = `BOM-${row.item_code}-`
+  return row.bom_list.split(',').some((bom) => bom.trim().startsWith(prefix))
+}
+
 const EXCLUDE_CHIP_STYLE = {
   color: '#c0392b',
   fontSize: '10px',
@@ -736,22 +742,29 @@ const columns = computed(() => {
             },
             row.item_code,
           )
-          if (!isOutOfSync(row)) return link
-          const delta = syncDelta(row)
-          const sign = delta > 0 ? '+' : ''
-          const stored = row.on_hand_inventory ?? 0
-          const current = currentStockLevels.value[row.item_code]
-          return h(
-            'span',
-            {
-              style: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-              },
-            },
-            [
-              link,
+          const badges = []
+          if (isBomParent(row)) {
+            badges.push(
+              h(
+                'span',
+                {
+                  title: 'This is the Parent Item of this BOM',
+                  style: {
+                    color: '#7f8c8d',
+                    cursor: 'default',
+                    fontSize: '13px',
+                  },
+                },
+                '⚙',
+              ),
+            )
+          }
+          if (isOutOfSync(row)) {
+            const delta = syncDelta(row)
+            const sign = delta > 0 ? '+' : ''
+            const stored = row.on_hand_inventory ?? 0
+            const current = currentStockLevels.value[row.item_code]
+            badges.push(
               h(
                 'span',
                 {
@@ -766,7 +779,19 @@ const columns = computed(() => {
                 },
                 '⚠',
               ),
-            ],
+            )
+          }
+          if (badges.length === 0) return link
+          return h(
+            'span',
+            {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+              },
+            },
+            [link, ...badges],
           )
         }
         const isSelected = row.measure_key === closed_column_field.value

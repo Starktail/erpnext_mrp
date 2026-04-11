@@ -37,6 +37,8 @@ class TestMRPRun(FrappeTestCase):
 		frappe.db.delete("MRP Entry")
 		frappe.db.delete("BOM")
 		frappe.db.delete("Item")
+		frappe.db.delete("Item Default")
+		frappe.db.delete("UOM Conversion Detail")
 		frappe.db.delete("MRP Forecast")
 		frappe.db.delete("Sales Order")
 		frappe.db.delete("Purchase Order")
@@ -86,6 +88,9 @@ class TestMRPRun(FrappeTestCase):
 			dict(fieldname="additional_shipping_days", label="Additional Shipping Days", fieldtype="Data"),
 		)
 
+		self._original_buying_price_list = frappe.db.get_single_value("Buying Settings", "buying_price_list")
+		frappe.db.set_single_value("Buying Settings", "buying_price_list", "Standard Buying")
+
 	def tearDown(self):
 		if frappe.db.exists("Custom Field", "Item-custom_additional_lead_time"):
 			frappe.delete_doc("Custom Field", "Item-custom_additional_lead_time", force=True)
@@ -94,6 +99,10 @@ class TestMRPRun(FrappeTestCase):
 		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
 		mrp_settings.item_condition = ""
 		mrp_settings.save()
+
+		frappe.db.set_single_value(
+			"Buying Settings", "buying_price_list", self._original_buying_price_list or ""
+		)
 
 		super().tearDown()
 
@@ -1553,11 +1562,11 @@ class TestMRPRun(FrappeTestCase):
 		self.assertEqual(child_w0.upstream_net_demand, 10)
 		self.assertEqual(child_w1.upstream_net_demand or 0, 0)
 
-	def test_forecast_only_mode_children_receive_no_suggested_receipts(self, mock_date):
+	def test_forecast_only_mode_children_receive_upstream_demand(self, mock_date):
 		"""
-		Under requirement_based_on = "Forecast only", upstream_net_demand is written to the child
-		(via open_orders) but is ignored when computing demand. A child with no direct forecast
-		gets zero suggested_receipts. Documents the intentional behaviour of "Forecast only" mode.
+		Under requirement_based_on = "Forecast only", upstream_net_demand is added to demand
+		unconditionally regardless of mode. A child with no direct forecast still receives
+		suggested_receipts driven by the parent's production need.
 		"""
 		test_start_day = datetime.date(2026, 1, 5)
 		mock_date.today.return_value = test_start_day
@@ -1578,10 +1587,48 @@ class TestMRPRun(FrappeTestCase):
 		process_mrp_item_entries(enqueue=False)
 
 		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
-		self.assertEqual(child_entry.upstream_net_demand, 20)  # demand was written...
-		self.assertEqual(child_entry.open_orders, 20)  # ...and flows into open_orders...
-		self.assertEqual(child_entry.total_forecast_demand or 0, 0)
-		self.assertEqual(child_entry.suggested_receipts or 0, 0)  # ...but ignored under Forecast only
+		self.assertEqual(child_entry.upstream_net_demand, 20)  # explosion wrote 10 x 2
+		self.assertEqual(child_entry.open_orders or 0, 0)  # not in open_orders
+		self.assertEqual(child_entry.forecast_demand or 0, 0)  # no direct forecast
+		self.assertEqual(
+			child_entry.total_forecast_demand, 20
+		)  # forecast_demand(0) + upstream_net_demand(20)
+		self.assertEqual(child_entry.suggested_receipts, 20)  # demand = 0 + 20 → shortage → receipts
+
+	def test_open_orders_only_mode_children_receive_upstream_demand(self, mock_date):
+		"""
+		Under requirement_based_on = "Open Orders only", upstream_net_demand is still added to
+		demand unconditionally. A child with no direct SO or WO demand still receives
+		suggested_receipts when its parent has a production need driven by a Sales Order.
+		"""
+		test_start_day = datetime.date(2026, 1, 5)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-NET-PARENT", "Net Parent", "Raw Material", lead_time_days=7)
+		create_item("TEST-NET-CHILD", "Net Child", "Raw Material", lead_time_days=0)
+		make_bom("TEST-NET-PARENT", [{"item_code": "TEST-NET-CHILD", "qty": 2}])
+
+		self.mrp_settings.item_condition = "doc.item_code in ['TEST-NET-PARENT', 'TEST-NET-CHILD']"
+		self.mrp_settings.requirement_based_on = "Open Orders only"
+		self.mrp_settings.save()
+
+		create_sales_order(
+			item_code="TEST-NET-PARENT",
+			qty=10,
+			delivery_date=test_start_day,
+			transaction_date=test_start_day,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		parent_entry = get_mrp_entry_by_item_week("TEST-NET-PARENT", test_start_day)
+		self.assertGreater(parent_entry.suggested_receipts, 0)
+
+		child_entry = get_mrp_entry_by_item_week("TEST-NET-CHILD", test_start_day)
+		self.assertEqual(child_entry.upstream_net_demand, parent_entry.suggested_receipts * 2)
+		self.assertEqual(child_entry.open_orders or 0, 0)  # not in open_orders
+		self.assertGreater(child_entry.suggested_receipts, 0)
 
 	def test_on_hand_inventory_wrong_when_stock_transaction_on_today(self, mock_date):
 		"""
@@ -1627,6 +1674,241 @@ class TestMRPRun(FrappeTestCase):
 		self.assertEqual(header[0].on_hand_inventory, 50)
 		self.assertEqual(header[0].on_hand_inventory_excl_reorder_level, 50)
 		self.assertEqual(header[0].on_hand_inventory_no_action, 50)
+
+	def test_rejected_warehouse_stock_excluded_from_on_hand(self, mock_date):
+		"""Stock held in a rejected warehouse must not count toward on_hand_inventory."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-REJ-MRP", "Rejected WH Test Item", "Raw Material", lead_time_days=0)
+
+		self.mrp_settings.item_condition = "doc.item_code == 'TEST-REJ-MRP'"
+		self.mrp_settings.save()
+
+		if not frappe.db.exists("Warehouse", "_Test Rejected WH - _TC"):
+			frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "_Test Rejected WH",
+					"is_rejected_warehouse": 1,
+					"company": "_Test Company",
+				}
+			).insert(ignore_permissions=True)
+		else:
+			frappe.db.set_value("Warehouse", "_Test Rejected WH - _TC", "is_rejected_warehouse", 1)
+
+		make_stock_entry(
+			item_code="TEST-REJ-MRP",
+			posting_date=test_start_day,
+			qty=100,
+			to_warehouse="_Test Rejected WH - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		create_sales_order(
+			item_code="TEST-REJ-MRP",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-REJ-MRP", "is_header": 1},
+			fields=["on_hand_inventory"],
+		)
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].on_hand_inventory, 0)
+
+	def test_item_price_uses_buying_price_list(self, mock_date):
+		"""Price from Buying Settings buying_price_list is used when no supplier-specific price exists."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		self.mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		self.mrp_settings.save()
+
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list = "Standard Buying"
+		price.price_list_rate = 5.0
+		price.valid_from = test_start_day
+		price.save()
+
+		create_sales_order(
+			item_code="SRZ11111",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("SRZ11111", add_to_date(test_start_day, days=7))
+		self.assertEqual(entry.suggested_orders_value, 50.0)
+
+	def test_item_price_supplier_specific_takes_priority(self, mock_date):
+		"""Supplier-specific Item Price beats the buying price list price."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		self.mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		self.mrp_settings.save()
+
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		pl_currency = frappe.db.get_value("Price List", "Standard Buying", "currency")
+
+		p1 = frappe.new_doc("Item Price")
+		p1.item_code = "SRZ11111"
+		p1.price_list = "Standard Buying"
+		p1.price_list_rate = 5.0
+		p1.valid_from = test_start_day
+		p1.save()
+
+		p2 = frappe.new_doc("Item Price")
+		p2.item_code = "SRZ11111"
+		p2.price_list = "Standard Buying"
+		p2.supplier = "_Test Supplier"
+		p2.price_list_rate = 8.0
+		p2.buying = 1
+		p2.currency = pl_currency
+		p2.valid_from = test_start_day
+		p2.save()
+
+		create_sales_order(
+			item_code="SRZ11111",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("SRZ11111", add_to_date(test_start_day, days=7))
+		self.assertEqual(entry.suggested_orders_value, 80.0)
+
+	def test_item_price_wrong_price_list_ignored(self, mock_date):
+		"""An Item Price on a different buying price list (different currency) is ignored; valuation_rate is used."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		self.mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		self.mrp_settings.save()
+
+		if not frappe.db.exists("Price List", "_Test USD Buying"):
+			pl = frappe.new_doc("Price List")
+			pl.price_list_name = "_Test USD Buying"
+			pl.currency = "USD"
+			pl.buying = 1
+			pl.insert(ignore_permissions=True)
+
+		p = frappe.new_doc("Item Price")
+		p.item_code = "SRZ11111"
+		p.price_list = "_Test USD Buying"
+		p.price_list_rate = 999.0
+		p.valid_from = test_start_day
+		p.save()
+
+		create_sales_order(
+			item_code="SRZ11111",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("SRZ11111", add_to_date(test_start_day, days=7))
+		# No price on Standard Buying; valuation_rate = 10 (set in create_item); 10 x 10 = 100
+		self.assertEqual(entry.suggested_orders_value, 100.0)
+
+	def test_item_price_expired_is_ignored(self, mock_date):
+		"""An Item Price whose valid_upto is in the past is not used."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		self.mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		self.mrp_settings.save()
+
+		yesterday = add_to_date(test_start_day, days=-1)
+
+		p_expired = frappe.new_doc("Item Price")
+		p_expired.item_code = "SRZ11111"
+		p_expired.price_list = "Standard Buying"
+		p_expired.price_list_rate = 999.0
+		p_expired.valid_from = add_to_date(test_start_day, days=-30)
+		p_expired.valid_upto = yesterday
+		p_expired.save()
+
+		p_valid = frappe.new_doc("Item Price")
+		p_valid.item_code = "SRZ11111"
+		p_valid.price_list = "Standard Buying"
+		p_valid.price_list_rate = 7.0
+		p_valid.valid_from = test_start_day
+		p_valid.save()
+
+		create_sales_order(
+			item_code="SRZ11111",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("SRZ11111", add_to_date(test_start_day, days=7))
+		self.assertEqual(entry.suggested_orders_value, 70.0)
+
+	def test_item_price_uom_conversion(self, mock_date):
+		"""A price in a non-stock UoM is converted to price-per-stock-UoM before use."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		self.mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		self.mrp_settings.save()
+
+		if not frappe.db.exists("UOM", "Test Box"):
+			frappe.get_doc({"doctype": "UOM", "uom_name": "Test Box"}).insert()
+
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.uoms = []
+		row = item.append("uoms")
+		row.uom = "Test Box"
+		row.conversion_factor = 100  # 1 Test Box = 100 Nos
+		item.save()
+
+		p = frappe.new_doc("Item Price")
+		p.item_code = "SRZ11111"
+		p.price_list = "Standard Buying"
+		p.price_list_rate = 500.0
+		p.uom = "Test Box"
+		p.valid_from = test_start_day
+		p.save()
+
+		create_sales_order(
+			item_code="SRZ11111",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entry = get_mrp_entry_by_item_week("SRZ11111", add_to_date(test_start_day, days=7))
+		# 500 / 100 = 5 per Nos; 10 x 5 = 50
+		self.assertEqual(entry.suggested_orders_value, 50.0)
 
 
 def get_mrp_entry_by_item_week(item_code: str, demand_date: datetime.datetime):
