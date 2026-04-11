@@ -1190,10 +1190,15 @@ def _finalise_suggestions(
 		_publish_mrp_run_complete()
 
 
+def _get_rejected_warehouses() -> set[str]:
+	return set(frappe.db.sql_list("SELECT name FROM `tabWarehouse` WHERE is_rejected_warehouse = 1"))
+
+
 def _process_levels_sequentially(enqueue: bool) -> None:
 	filters = frappe._dict({"from_date": date.today(), "to_date": date.today()})
 	stock_level_report = execute_stock_balance_report(filters=filters)
-	stock_levels = stock_level_report[1]
+	rejected_warehouses = _get_rejected_warehouses()
+	stock_levels = [sl for sl in stock_level_report[1] if sl.get("warehouse") not in rejected_warehouses]
 
 	settings = frappe.get_cached_doc("MRP Settings")
 	requirement_based_on = settings.requirement_based_on

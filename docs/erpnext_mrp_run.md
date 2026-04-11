@@ -79,7 +79,7 @@ The raw signals are summed into planning totals for all items at the current lev
 
 For each item at this level, the system calculates how much needs to be produced or purchased, period by period, in chronological order:
 
-1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level. For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
+1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
 2. **Net Requirements**: Total demand is determined by the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
 3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
@@ -136,7 +136,7 @@ The following are the key fields calculated for each item in each period:
 | `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                     |
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
 | **Inventory & Demand**          |                                                                                                                                                                       |
-| `on_hand_inventory`             | The stock on hand at the beginning of the period.                                                                                                                     |
+| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) is excluded.                        |
 | `open_orders`                   | Total firm demand for the period: Reserved Qty (Sales Orders) + Reserved Qty for Production (Work Orders) + Upstream Net Demand. |
 | `upstream_net_demand`           | Net demand exploded from parent items at the level above. Written when a parent's `suggested_receipts > 0` and this item appears in the parent's BOM. Accumulated additively from all parents. |
 | `total_forecast_demand`         | Total demand from MRP Forecasts for this item and period.                                                                        |

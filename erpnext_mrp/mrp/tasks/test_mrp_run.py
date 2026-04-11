@@ -1675,6 +1675,55 @@ class TestMRPRun(FrappeTestCase):
 		self.assertEqual(header[0].on_hand_inventory_excl_reorder_level, 50)
 		self.assertEqual(header[0].on_hand_inventory_no_action, 50)
 
+	def test_rejected_warehouse_stock_excluded_from_on_hand(self, mock_date):
+		"""Stock held in a rejected warehouse must not count toward on_hand_inventory."""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		create_item("TEST-REJ-MRP", "Rejected WH Test Item", "Raw Material", lead_time_days=0)
+
+		self.mrp_settings.item_condition = "doc.item_code == 'TEST-REJ-MRP'"
+		self.mrp_settings.save()
+
+		if not frappe.db.exists("Warehouse", "_Test Rejected WH - _TC"):
+			frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "_Test Rejected WH",
+					"is_rejected_warehouse": 1,
+					"company": "_Test Company",
+				}
+			).insert(ignore_permissions=True)
+		else:
+			frappe.db.set_value("Warehouse", "_Test Rejected WH - _TC", "is_rejected_warehouse", 1)
+
+		make_stock_entry(
+			item_code="TEST-REJ-MRP",
+			posting_date=test_start_day,
+			qty=100,
+			to_warehouse="_Test Rejected WH - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		create_sales_order(
+			item_code="TEST-REJ-MRP",
+			qty=10,
+			delivery_date=add_to_date(test_start_day, days=7),
+			transaction_date=test_start_day,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": "TEST-REJ-MRP", "is_header": 1},
+			fields=["on_hand_inventory"],
+		)
+		self.assertEqual(len(header), 1)
+		self.assertEqual(header[0].on_hand_inventory, 0)
+
 	def test_item_price_uses_buying_price_list(self, mock_date):
 		"""Price from Buying Settings buying_price_list is used when no supplier-specific price exists."""
 		test_start_day = datetime.date(2025, 11, 4)

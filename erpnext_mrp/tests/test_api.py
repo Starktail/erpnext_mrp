@@ -41,3 +41,47 @@ class TestGetCurrentStockLevels(FrappeTestCase):
 		with patch.object(frappe.db, "sql", return_value=rows):
 			result = get_current_stock_levels(["ITEM-D"])
 		self.assertAlmostEqual(result["ITEM-D"], 0.0)
+
+	def test_rejected_warehouse_stock_excluded(self):
+		"""Stock in a warehouse with is_rejected_warehouse=1 is not counted."""
+		if not frappe.db.exists("Item Group", "All Item Groups"):
+			frappe.get_doc({"doctype": "Item Group", "item_group_name": "All Item Groups"}).insert(
+				ignore_permissions=True
+			)
+
+		if not frappe.db.exists("Item", "TEST-REJ-API"):
+			frappe.get_doc(
+				{
+					"doctype": "Item",
+					"item_code": "TEST-REJ-API",
+					"item_name": "Test Rejected WH API Item",
+					"item_group": "All Item Groups",
+					"stock_uom": "Nos",
+					"is_stock_item": 1,
+				}
+			).insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Warehouse", "_Test Rejected WH - _TC"):
+			frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "_Test Rejected WH",
+					"is_rejected_warehouse": 1,
+					"company": "_Test Company",
+				}
+			).insert(ignore_permissions=True)
+		else:
+			frappe.db.set_value("Warehouse", "_Test Rejected WH - _TC", "is_rejected_warehouse", 1)
+
+		frappe.db.delete("Bin", {"item_code": "TEST-REJ-API", "warehouse": "_Test Rejected WH - _TC"})
+		frappe.get_doc(
+			{
+				"doctype": "Bin",
+				"item_code": "TEST-REJ-API",
+				"warehouse": "_Test Rejected WH - _TC",
+				"actual_qty": 50.0,
+			}
+		).insert(ignore_permissions=True)
+
+		result = get_current_stock_levels(["TEST-REJ-API"])
+		self.assertAlmostEqual(result.get("TEST-REJ-API", 0.0), 0.0)
