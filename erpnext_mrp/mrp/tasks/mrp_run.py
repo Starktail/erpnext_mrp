@@ -263,6 +263,7 @@ def _update_forecast_demand():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
+	start_of_week = start_date - datetime.timedelta(days=start_date.weekday())
 	end_date = start_date + datetime.timedelta(weeks=look_ahead)
 
 	sql_query = """
@@ -274,11 +275,13 @@ def _update_forecast_demand():
             END AS calendar_week,
             SUM(forecast_quantity) AS total_forecast_quantity
         FROM `tabMRP Forecast`
-        WHERE forecast_date <= %(end_date)s
+        WHERE forecast_date >= %(start_of_week)s AND forecast_date <= %(end_date)s
         GROUP BY item_code, calendar_week;
     """
 	forecast_data = frappe.db.sql(
-		sql_query, values={"start_date": start_date, "end_date": end_date}, as_dict=True
+		sql_query,
+		values={"start_date": start_date, "start_of_week": start_of_week, "end_date": end_date},
+		as_dict=True,
 	)
 
 	if not forecast_data:
