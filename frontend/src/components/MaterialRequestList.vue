@@ -154,6 +154,215 @@
         <Button @click="showDialog = false">Close</Button>
       </template>
     </Dialog>
+    <Dialog
+      v-model="showBreakdownDialog"
+      @hide="showBreakdownDialog = false"
+      :options="{ size: 'xl' }"
+    >
+      <template #body-title>
+        <div class="flex items-center gap-1 flex-wrap">
+          <span
+            v-for="(frame, idx) in breakdownStack"
+            :key="idx"
+            class="flex items-center gap-1"
+          >
+            <span v-if="idx > 0" class="text-gray-400">›</span>
+            <button
+              v-if="idx < breakdownStack.length - 1"
+              class="text-blue-500 hover:underline text-sm font-normal"
+              @click="breakdownStack.splice(idx + 1)"
+            >
+              {{ frame.item_code }}
+            </button>
+            <span v-else class="text-lg font-semibold text-ink-gray-9">
+              {{ frame.item_code }}
+            </span>
+            <span class="text-xs text-gray-400">{{ frame.week_key }}</span>
+          </span>
+        </div>
+      </template>
+      <template #body-content>
+        <div v-if="breakdownLoading" class="py-8 text-center text-gray-400">
+          Loading…
+        </div>
+        <div v-else-if="breakdownData" class="space-y-6 text-sm">
+          <div class="flex gap-6 p-3 bg-gray-50 rounded font-mono text-xs">
+            <span
+              >Direct forecast:
+              <b>{{ breakdownData.stored.forecast_demand }}</b></span
+            >
+            <span>+</span>
+            <span
+              >Upstream net demand:
+              <b>{{ breakdownData.stored.upstream_net_demand }}</b></span
+            >
+            <span>=</span>
+            <span
+              >Total:
+              <b>{{ breakdownData.stored.total_forecast_demand }}</b></span
+            >
+          </div>
+          <div
+            v-if="breakdownReconciliationWarning"
+            class="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2"
+          >
+            ⚠ Calculated values differ from stored values. BOMs or forecasts
+            may have changed since the last MRP run ({{
+              breakdownData.last_mrp_run ?? 'unknown'
+            }}).
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-700 mb-2">
+              Direct Forecasts
+              <span class="font-normal text-gray-400"
+                >({{ breakdownData.direct_forecasts.length }} entries)</span
+              >
+            </h4>
+            <p
+              v-if="breakdownData.direct_forecasts.length === 0"
+              class="text-gray-400 italic text-xs"
+            >
+              No MRP Forecast entries for this item in this week.
+            </p>
+            <table v-else class="w-full text-xs border-collapse">
+              <thead>
+                <tr class="border-b text-left text-gray-500">
+                  <th class="py-1 pr-4">Forecast Date</th>
+                  <th class="py-1 pr-4 text-right">Quantity</th>
+                  <th class="py-1">Document</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="f in breakdownData.direct_forecasts"
+                  :key="f.name"
+                  class="border-b border-gray-100"
+                >
+                  <td class="py-1 pr-4">{{ f.forecast_date }}</td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ f.forecast_quantity }}
+                  </td>
+                  <td class="py-1">
+                    <a
+                      :href="`/app/mrp-forecast/${f.name}`"
+                      target="_blank"
+                      class="text-blue-500 hover:underline"
+                      >{{ f.name }}</a
+                    >
+                  </td>
+                </tr>
+                <tr class="font-semibold text-gray-700 border-t">
+                  <td class="py-1 pr-4">Total</td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ directForecastTotal }}
+                  </td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-700 mb-2">
+              Upstream Net Demand
+              <span class="font-normal text-gray-400">
+                (exploded from
+                {{ breakdownData.parent_contributions.length }} parent item(s))
+              </span>
+            </h4>
+            <p
+              v-if="breakdownData.parent_contributions.length === 0"
+              class="text-gray-400 italic text-xs"
+            >
+              No parent items contributed upstream demand in this week.
+            </p>
+            <table v-else class="w-full text-xs border-collapse">
+              <thead>
+                <tr class="border-b text-left text-gray-500">
+                  <th class="py-1 pr-4">Parent Item</th>
+                  <th class="py-1 pr-4 text-right">Suggestions</th>
+                  <th class="py-1 pr-4 text-right">BOM Ratio</th>
+                  <th class="py-1 pr-4 text-right">Contribution</th>
+                  <th class="py-1 pr-4">Parent Week</th>
+                  <th class="py-1"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="p in breakdownData.parent_contributions"
+                  :key="`${p.parent_item_code}-${p.parent_target_date}`"
+                  class="border-b border-gray-100"
+                >
+                  <td class="py-1 pr-4">
+                    <a
+                      :href="`/app/item/${p.parent_item_code}`"
+                      target="_blank"
+                      class="text-blue-500 hover:underline"
+                      >{{ p.parent_item_code }}</a
+                    >
+                    <span class="text-gray-400 ml-1">{{
+                      p.parent_item_name
+                    }}</span>
+                  </td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ p.parent_suggested_receipts }}
+                  </td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ p.component_qty_per_bom }}/{{ p.bom_output_qty }} =
+                    {{
+                      (p.component_qty_per_bom / p.bom_output_qty).toFixed(4)
+                    }}
+                  </td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ p.contribution }}
+                  </td>
+                  <td class="py-1 pr-4 text-gray-500">
+                    {{ p.parent_target_date }}
+                  </td>
+                  <td class="py-1">
+                    <button
+                      v-if="
+                        p.parent_bom_level > 0 &&
+                        !isAlreadyInBreakdownStack(p.parent_item_code)
+                      "
+                      class="text-xs text-blue-500 hover:underline whitespace-nowrap"
+                      @click="
+                        drillUpToParent(
+                          p.parent_item_code,
+                          p.parent_item_name,
+                          p.parent_target_date,
+                        )
+                      "
+                    >
+                      Explain ↑
+                    </button>
+                  </td>
+                </tr>
+                <tr class="font-semibold text-gray-700 border-t">
+                  <td class="py-1 pr-4" colspan="3">Total</td>
+                  <td class="py-1 pr-4 text-right font-mono">
+                    {{ upstreamTotal.toFixed(3) }}
+                  </td>
+                  <td colspan="2"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-xs text-gray-400">
+            MRP last run: {{ breakdownData.last_mrp_run ?? 'unknown' }}
+          </p>
+        </div>
+      </template>
+      <template #actions>
+        <Button
+          v-if="breakdownStack.length > 1"
+          variant="subtle"
+          @click="breakdownGoBack"
+        >
+          ← Back
+        </Button>
+        <Button @click="showBreakdownDialog = false">Close</Button>
+      </template>
+    </Dialog>
     <Dialog v-model="showCreateDialog" @hide="showCreateDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">
@@ -249,6 +458,8 @@ const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
 const showForecastWarning = ref(false)
+const showBreakdownDialog = ref(false)
+const breakdownStack = ref([])
 const currentStockLevels = ref({})
 const stockSyncLoading = ref(false)
 const SYNC_EPSILON = 0.001
@@ -662,6 +873,37 @@ const quantityFields = computed(() => {
   return ALL_QUANTITY_FIELDS.filter((f) => settings[f.value] !== 0)
 })
 
+const breakdownCurrent = computed(
+  () => breakdownStack.value[breakdownStack.value.length - 1] ?? null,
+)
+const breakdownLoading = computed(
+  () => breakdownCurrent.value?.loading ?? false,
+)
+const breakdownData = computed(() => breakdownCurrent.value?.data ?? null)
+
+const directForecastTotal = computed(() =>
+  (breakdownData.value?.direct_forecasts ?? []).reduce(
+    (s, f) => s + (f.forecast_quantity || 0),
+    0,
+  ),
+)
+
+const upstreamTotal = computed(() =>
+  (breakdownData.value?.parent_contributions ?? []).reduce(
+    (s, p) => s + (p.contribution || 0),
+    0,
+  ),
+)
+
+const breakdownReconciliationWarning = computed(() => {
+  if (!breakdownData.value) return false
+  const { forecast_demand, upstream_net_demand } = breakdownData.value.stored
+  return (
+    Math.abs(directForecastTotal.value - forecast_demand) > 0.01 ||
+    Math.abs(upstreamTotal.value - upstream_net_demand) > 0.01
+  )
+})
+
 function getWeekNumber(d) {
   d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
@@ -1026,6 +1268,27 @@ const columns = computed(() => {
           formattedVal = ''
         } else if (qField && qField.formatter) {
           formattedVal = qField.formatter(val)
+        }
+
+        if (
+          row.type === 'DETAIL' &&
+          row.measure_key === 'total_forecast_demand' &&
+          val > 0
+        ) {
+          return h(
+            'span',
+            {
+              style: {
+                cursor: 'pointer',
+                textDecoration: 'underline dotted',
+                textUnderlineOffset: '3px',
+              },
+              title: 'Click to explain',
+              onClick: () =>
+                openBreakdownDialog(row.item_code, weekKey, row.item_name),
+            },
+            formattedVal,
+          )
         }
 
         return formattedVal
@@ -1434,6 +1697,66 @@ async function checkForecastCoverage() {
 
 function handleOpenDialog() {
   showDialog.value = true
+}
+
+function _dateToWeekKey(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z')
+  const [year, week] = getWeekNumber(d)
+  return `${year}-W${String(week).padStart(2, '0')}`
+}
+
+function isAlreadyInBreakdownStack(item_code) {
+  return breakdownStack.value.some((frame) => frame.item_code === item_code)
+}
+
+async function _loadBreakdownFrame(idx, item_code, week_key) {
+  try {
+    const result = await call(
+      'erpnext_mrp.mrp.tasks.mrp_run.get_forecast_demand_breakdown',
+      { item_code, week_key },
+    )
+    breakdownStack.value[idx] = {
+      ...breakdownStack.value[idx],
+      data: result,
+      loading: false,
+    }
+  } catch (e) {
+    breakdownStack.value[idx] = { ...breakdownStack.value[idx], loading: false }
+    toast({
+      title: 'Error loading breakdown',
+      text: e.message,
+      variant: 'error',
+    })
+  }
+}
+
+async function openBreakdownDialog(item_code, week_key, item_name) {
+  breakdownStack.value = [
+    { item_code, week_key, item_name, data: null, loading: true },
+  ]
+  showBreakdownDialog.value = true
+  await _loadBreakdownFrame(0, item_code, week_key)
+}
+
+async function drillUpToParent(
+  parent_item_code,
+  parent_item_name,
+  parent_target_date,
+) {
+  const week_key = _dateToWeekKey(parent_target_date)
+  const idx = breakdownStack.value.length
+  breakdownStack.value.push({
+    item_code: parent_item_code,
+    week_key,
+    item_name: parent_item_name,
+    data: null,
+    loading: true,
+  })
+  await _loadBreakdownFrame(idx, parent_item_code, week_key)
+}
+
+function breakdownGoBack() {
+  if (breakdownStack.value.length > 1) breakdownStack.value.pop()
 }
 
 async function openCreateRequestDialog() {
