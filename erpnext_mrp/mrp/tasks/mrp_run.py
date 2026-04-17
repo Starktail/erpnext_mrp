@@ -9,7 +9,7 @@ import frappe
 from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
-from frappe.utils import add_days, getdate
+from frappe.utils import add_days, flt, getdate
 from pypika import Order
 
 from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
@@ -1103,6 +1103,107 @@ def _explode_net_demand_for_level(level: int) -> None:
         WHERE name IN ({names_str})
     """
 	frappe.db.sql(update_query)  # nosemgrep
+
+
+def _week_key_to_calendar_week(week_key: str) -> str:
+	year, week = week_key.split("-W")
+	return f"{year}CW{int(week):02d}"
+
+
+@frappe.whitelist()
+def get_forecast_demand_breakdown(item_code: str, week_key: str) -> dict:
+	calendar_week = _week_key_to_calendar_week(week_key)
+	entry_name = f"{item_code}-{calendar_week}"
+
+	stored = frappe.db.get_value(
+		"MRP Entry",
+		entry_name,
+		["forecast_demand", "upstream_net_demand", "total_forecast_demand", "target_date"],
+		as_dict=True,
+	)
+	if not stored:
+		frappe.throw(_(f"MRP Entry {entry_name} not found. Re-run MRP first."))
+
+	today = date.today()
+
+	direct_forecasts = frappe.db.sql(
+		"""
+        SELECT forecast_date, forecast_quantity, name
+        FROM `tabMRP Forecast`
+        WHERE item_code = %(item_code)s
+          AND DATE_FORMAT(
+                  GREATEST(forecast_date, %(today)s),
+                  '%%xCW%%v'
+              ) = %(calendar_week)s
+        ORDER BY forecast_date
+        """,
+		values={"item_code": item_code, "calendar_week": calendar_week, "today": today},
+		as_dict=True,
+	)
+
+	parent_contributions = frappe.db.sql(
+		"""# nosemgrep: frappe-sql-format-injection
+        SELECT
+            parent_me.item_code          AS parent_item_code,
+            parent_me.item_name          AS parent_item_name,
+            parent_me.target_date        AS parent_target_date,
+            parent_me.lead_time          AS parent_lead_time,
+            parent_me.bom_level          AS parent_bom_level,
+            parent_me.suggested_receipts AS parent_suggested_receipts,
+            bom_item.stock_qty           AS component_qty_per_bom,
+            bom.quantity                 AS bom_output_qty,
+            ROUND(
+                parent_me.suggested_receipts * bom_item.stock_qty / bom.quantity,
+                6
+            ) AS contribution
+        FROM `tabMRP Entry` AS parent_me
+        JOIN `tabBOM` AS bom
+            ON parent_me.item_code = bom.item
+            AND bom.is_active = 1
+            AND bom.is_default = 1
+        JOIN `tabBOM Item` AS bom_item
+            ON bom.name = bom_item.parent
+            AND bom_item.item_code = %(item_code)s
+        WHERE
+            parent_me.is_manufactured = 1
+            AND parent_me.suggested_receipts > 0
+            AND DATE_FORMAT(
+                    GREATEST(
+                        CASE
+                            WHEN parent_me.is_manufactured = 1
+                                THEN DATE_SUB(parent_me.target_date, INTERVAL parent_me.lead_time DAY)
+                            ELSE parent_me.target_date
+                        END,
+                        %(today)s
+                    ),
+                    '%%xCW%%v'
+                ) = %(calendar_week)s
+        ORDER BY parent_me.bom_level, parent_me.target_date
+        """,
+		values={"item_code": item_code, "calendar_week": calendar_week, "today": today},
+		as_dict=True,
+	)  # nosemgrep
+
+	last_run = frappe.db.get_value(
+		"Scheduled Job Log",
+		{"scheduled_job_type": "mrp_run.mrp_run"},
+		"creation",
+		order_by="creation desc",
+	)
+
+	return {
+		"item_code": item_code,
+		"week_key": week_key,
+		"calendar_week": calendar_week,
+		"stored": {
+			"forecast_demand": flt(stored.forecast_demand),
+			"upstream_net_demand": flt(stored.upstream_net_demand),
+			"total_forecast_demand": flt(stored.total_forecast_demand),
+		},
+		"direct_forecasts": direct_forecasts,
+		"parent_contributions": parent_contributions,
+		"last_mrp_run": str(last_run) if last_run else None,
+	}
 
 
 def _process_suggested_receipts_for_level(
