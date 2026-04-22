@@ -3,6 +3,19 @@
     <div class="mb-4 flex justify-between items-center shrink-0">
       <div class="flex gap-2 items-center">
         <Button @click="clearFilters">Clear Filters</Button>
+        <NDropdown
+          trigger="click"
+          :options="presetDropdownOptions"
+          @select="handlePresetDropdownSelect"
+        >
+          <span>
+            <Button
+              :class="activePresetName ? 'font-semibold text-blue-700' : ''"
+            >
+              {{ activePresetName ?? 'Filters ▾' }}
+            </Button>
+          </span>
+        </NDropdown>
         <Button @click="rerunMrp">Rerun MRP Calculations</Button>
         <Combobox
           :options="quantityFields"
@@ -396,6 +409,35 @@
         >
       </template>
     </Dialog>
+    <Dialog v-model="showSavePresetModal" @hide="showSavePresetModal = false">
+      <template #body-title>
+        <h3 class="text-2xl font-semibold text-ink-gray-9">
+          Save Filter Preset
+        </h3>
+      </template>
+      <template #body-content>
+        <div class="space-y-2">
+          <NInput
+            v-model:value="presetNameInput"
+            placeholder="Preset name…"
+            autofocus
+            @keydown.enter="confirmSavePreset"
+          />
+          <p v-if="presetNameConflict" class="text-sm text-orange-600">
+            A preset with this name already exists and will be overwritten.
+          </p>
+        </div>
+      </template>
+      <template #actions>
+        <Button @click="showSavePresetModal = false">Cancel</Button>
+        <Button
+          variant="solid"
+          :disabled="!presetNameInput.trim()"
+          @click="confirmSavePreset"
+          >Save</Button
+        >
+      </template>
+    </Dialog>
     <Dialog v-model="showSuccessDialog" @hide="showSuccessDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">
@@ -435,7 +477,8 @@ import {
   onMounted,
   onUnmounted,
 } from 'vue'
-import { NDataTable, NInput, NInputNumber, NSpace } from 'naive-ui'
+import { NDataTable, NInput, NInputNumber, NSpace, NDropdown } from 'naive-ui'
+import { useFilterPresets } from '../composables/useFilterPresets'
 import {
   Button,
   Dialog,
@@ -448,6 +491,15 @@ import {
   createDocumentResource,
 } from 'frappe-ui'
 import { formatCurrency as formatCurrencyUtil } from '../utils/numberFormat'
+
+const {
+  presets,
+  save: savePreset,
+  remove: removePreset,
+  load: loadPreset,
+} = useFilterPresets()
+const showSavePresetModal = ref(false)
+const presetNameInput = ref('')
 
 const showDialog = ref(false)
 const closed_column_field = ref('suggested_orders')
@@ -717,7 +769,17 @@ const mrpRunCompleteHandler = () => {
 }
 
 onMounted(async () => {
-  executeAsyncQuery()
+  const params = new URLSearchParams(window.location.search)
+  const presetParam = params.get('preset')
+  let presetLoaded = false
+  if (presetParam) {
+    const preset = loadPreset(presetParam)
+    if (preset) {
+      applyPreset(preset)
+      presetLoaded = true
+    }
+  }
+  if (!presetLoaded) executeAsyncQuery()
   checkForecastCoverage()
   window.frappe?.realtime?.on('mrp_run_complete', mrpRunCompleteHandler)
 })
@@ -1653,6 +1715,118 @@ watch(
     }
   },
 )
+
+const presetNameConflict = computed(() =>
+  presets.value.some((p) => p.name === presetNameInput.value.trim()),
+)
+
+const activePresetName = computed(() => {
+  const currentState = JSON.stringify({
+    appliedTextFilters: { ...appliedTextFilters },
+    appliedExcludeFilters: { ...appliedExcludeFilters },
+    appliedNumberFilters: JSON.parse(JSON.stringify(appliedNumberFilters)),
+    sorterRef: sorterRef.value,
+    closed_column_field: closed_column_field.value,
+  })
+  return (
+    presets.value.find((p) => {
+      const storedState = JSON.stringify({
+        appliedTextFilters: p.appliedTextFilters,
+        appliedExcludeFilters: p.appliedExcludeFilters,
+        appliedNumberFilters: p.appliedNumberFilters,
+        sorterRef: p.sorterRef,
+        closed_column_field: p.closed_column_field,
+      })
+      return storedState === currentState
+    })?.name ?? null
+  )
+})
+
+const presetDropdownOptions = computed(() => {
+  const opts = [
+    { label: 'Save current filters…', key: '__save__' },
+    { type: 'divider', key: 'div1' },
+  ]
+  if (presets.value.length === 0) {
+    opts.push({ label: 'No saved presets', key: '__empty__', disabled: true })
+  } else {
+    presets.value.forEach((p) => {
+      opts.push({
+        key: `load:${p.name}`,
+        label: () =>
+          h(
+            'div',
+            {
+              style:
+                'display:flex; justify-content:space-between; align-items:center; gap:16px; min-width:160px',
+            },
+            [
+              h('span', p.name),
+              h(
+                'span',
+                {
+                  style:
+                    'color:#c0392b; cursor:pointer; font-size:12px; padding:0 4px',
+                  onClick: (e) => {
+                    e.stopPropagation()
+                    removePreset(p.name)
+                  },
+                },
+                '✕',
+              ),
+            ],
+          ),
+      })
+    })
+  }
+  return opts
+})
+
+function confirmSavePreset() {
+  if (!presetNameInput.value.trim()) return
+  savePreset({
+    name: presetNameInput.value.trim(),
+    appliedTextFilters: { ...appliedTextFilters },
+    appliedExcludeFilters: { ...appliedExcludeFilters },
+    appliedNumberFilters: JSON.parse(JSON.stringify(appliedNumberFilters)),
+    sorterRef: { ...sorterRef.value },
+    closed_column_field: closed_column_field.value,
+  })
+  showSavePresetModal.value = false
+  presetNameInput.value = ''
+}
+
+function applyPreset(preset) {
+  Object.assign(appliedTextFilters, preset.appliedTextFilters)
+  Object.assign(textFilters, preset.appliedTextFilters)
+  Object.assign(appliedExcludeFilters, preset.appliedExcludeFilters ?? {})
+  Object.assign(excludeFilters, preset.appliedExcludeFilters ?? {})
+  Object.keys(preset.appliedNumberFilters).forEach((k) => {
+    if (appliedNumberFilters[k]) {
+      appliedNumberFilters[k].min = preset.appliedNumberFilters[k].min
+      appliedNumberFilters[k].max = preset.appliedNumberFilters[k].max
+      numberFilters[k].min = preset.appliedNumberFilters[k].min
+      numberFilters[k].max = preset.appliedNumberFilters[k].max
+    }
+  })
+  sorterRef.value = { ...preset.sorterRef }
+  closed_column_field.value = preset.closed_column_field
+  paginationReactive.page = 1
+  executeAsyncQuery()
+}
+
+function handlePresetDropdownSelect(key) {
+  if (key === '__empty__' || key === 'div1') return
+  if (key === '__save__') {
+    presetNameInput.value = ''
+    showSavePresetModal.value = true
+    return
+  }
+  if (key.startsWith('load:')) {
+    const preset = loadPreset(key.slice(5))
+    if (preset) applyPreset(preset)
+  }
+}
 
 function clearFilters() {
   Object.keys(textFilters).forEach((k) => {
