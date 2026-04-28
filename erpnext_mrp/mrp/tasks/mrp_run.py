@@ -1,7 +1,6 @@
-import datetime
 import itertools
 import math
-from datetime import date
+from datetime import date, datetime, timedelta
 
 _NO_REORDER_SENTINEL = 9999
 
@@ -37,7 +36,7 @@ def get_forecast_coverage_status() -> dict:
 		}
 
 	today = date.today()
-	look_ahead_end_date = today + datetime.timedelta(weeks=look_ahead)
+	look_ahead_end_date = today + timedelta(weeks=look_ahead)
 
 	row = frappe.db.sql(
 		"SELECT MAX(forecast_date) AS max_date FROM `tabMRP Forecast`",
@@ -189,7 +188,7 @@ def create_mrp_item_entries():
 	# Use a dictionary to store unique periods with their target dates
 	periods = {}
 	for i in range(look_ahead):
-		target_date = today + datetime.timedelta(weeks=i)
+		target_date = today + timedelta(weeks=i)
 		year, week, _unused = target_date.isocalendar()
 		period_str = f"-{year}CW{week:02d}"
 		if period_str not in periods:
@@ -202,7 +201,7 @@ def create_mrp_item_entries():
 	# item is a tuple: (item_code, lead_time, bom_level, root_bom, is_manufactured, is_header)
 	# period is a tuple: (period_str, target_date)
 	owner = frappe.session.user
-	creation = datetime.datetime.now()
+	creation = datetime.now()
 	final_values = [
 		(
 			f"{item[0]}{period[0]}",
@@ -263,8 +262,8 @@ def _update_forecast_demand():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
-	start_of_week = start_date - datetime.timedelta(days=start_date.weekday())
-	end_date = start_date + datetime.timedelta(weeks=look_ahead)
+	start_of_week = start_date - timedelta(days=start_date.weekday())
+	end_date = start_date + timedelta(weeks=look_ahead)
 
 	sql_query = """
         SELECT
@@ -327,7 +326,7 @@ def _update_reserved_qty():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
-	end_date = start_date + datetime.timedelta(weeks=look_ahead)
+	end_date = start_date + timedelta(weeks=look_ahead)
 
 	# Note: DATE_FORMAT(date, '%%xCW%%v') is used to create the week string, e.g., '2025CW39'.
 	# The double '%' is to escape the '%' for the frappe.db.sql parameter substitution.
@@ -429,7 +428,7 @@ def _update_reserved_qty_for_production():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
-	end_date = start_date + datetime.timedelta(weeks=look_ahead)
+	end_date = start_date + timedelta(weeks=look_ahead)
 
 	sql_query = """
         SELECT
@@ -491,7 +490,7 @@ def _update_planned_qty():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
-	end_date = start_date + datetime.timedelta(weeks=look_ahead)
+	end_date = start_date + timedelta(weeks=look_ahead)
 
 	sql_query = """
         SELECT
@@ -553,7 +552,7 @@ def _update_ordered_qty():
 	settings = frappe.get_cached_doc("MRP Settings")
 	look_ahead = settings.look_ahead or 6
 	start_date = date.today()
-	end_date = start_date + datetime.timedelta(weeks=look_ahead)
+	end_date = start_date + timedelta(weeks=look_ahead)
 
 	receiving_date_field = "schedule_date"
 	if settings.po_item_delivery_date_field:
@@ -1126,18 +1125,26 @@ def get_forecast_demand_breakdown(item_code: str, week_key: str) -> dict:
 
 	today = date.today()
 
+	iso_year = int(calendar_week[:4])
+	iso_week = int(calendar_week[-2:])
+
+	week_start = datetime.fromisocalendar(iso_year, iso_week, 1).date()
+	week_end = week_start + timedelta(days=7)
+
 	direct_forecasts = frappe.db.sql(
 		"""
-        SELECT forecast_date, forecast_quantity, name
-        FROM `tabMRP Forecast`
-        WHERE item_code = %(item_code)s
-          AND DATE_FORMAT(
-                  GREATEST(forecast_date, %(today)s),
-                  '%%xCW%%v'
-              ) = %(calendar_week)s
-        ORDER BY forecast_date
-        """,
-		values={"item_code": item_code, "calendar_week": calendar_week, "today": today},
+		SELECT forecast_date, forecast_quantity, name
+		FROM `tabMRP Forecast`
+		WHERE item_code = %(item_code)s
+		AND forecast_date >= %(week_start)s
+		AND forecast_date < %(week_end)s
+		ORDER BY forecast_date
+		""",
+		values={
+			"item_code": item_code,
+			"week_start": week_start,
+			"week_end": week_end,
+		},
 		as_dict=True,
 	)
 
@@ -1457,7 +1464,7 @@ def _publish_mrp_run_complete() -> None:
 	"""Notify all users with an MRP role so the Vue UI can refresh its data."""
 	import datetime
 
-	message = {"completed_at": datetime.datetime.now().isoformat()}
+	message = {"completed_at": datetime.now().isoformat()}
 	users = frappe.get_all(
 		"Has Role",
 		filters={"role": ["in", ["MRP Manager", "MRP User"]], "parenttype": "User"},
