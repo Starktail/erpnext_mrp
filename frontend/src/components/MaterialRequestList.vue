@@ -16,7 +16,9 @@
             </Button>
           </span>
         </NDropdown>
-        <Button @click="rerunMrp">Rerun MRP Calculations</Button>
+        <Button @click="rerunMrp" :disabled="mrpStatus === 'running'"
+          >Rerun MRP Calculations</Button
+        >
         <Combobox
           :options="quantityFields"
           v-model="closed_column_field"
@@ -25,7 +27,17 @@
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
-        <div class="text-sm text-gray-600">{{ lastMrpRunTime }}</div>
+        <a
+          v-if="mrpStatus === 'failed'"
+          href="/app/rq-job"
+          target="_blank"
+          class="text-sm"
+          :class="mrpStatusClass"
+          >{{ lastMrpRunTime }}</a
+        >
+        <div v-else class="text-sm" :class="mrpStatusClass">
+          {{ lastMrpRunTime }}
+        </div>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
           <span class="text-gray-600">Suggested Order</span>
@@ -510,6 +522,9 @@ const showSuccessDialog = ref(false)
 const newlyCreatedDocs = ref([])
 const showRerunDialog = ref(false)
 const showForecastWarning = ref(false)
+const mrpStatus = ref('idle') // 'idle' | 'running' | 'failed'
+const mrpErrors = ref([])
+let mrpStatusPollTimer = null
 const showBreakdownDialog = ref(false)
 const breakdownStack = ref([])
 const currentStockLevels = ref({})
@@ -761,7 +776,46 @@ const treeData = ref([])
 const scrollX = ref(2500)
 const loadingRef = ref(true)
 
+function applyMrpStatus(status) {
+  mrpStatus.value = status.status
+  mrpErrors.value = status.errors ?? []
+  if (status.status === 'running') {
+    startMrpStatusPolling()
+  } else {
+    stopMrpStatusPolling()
+  }
+}
+
+function startMrpStatusPolling() {
+  if (mrpStatusPollTimer) return
+  mrpStatusPollTimer = setInterval(async () => {
+    const status = await call(
+      'erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status',
+    )
+    applyMrpStatus(status)
+    if (status.status !== 'running') {
+      currentStockLevels.value = {}
+      executeAsyncQuery()
+      last_mrp_run.reload()
+    }
+  }, 5000)
+}
+
+function stopMrpStatusPolling() {
+  clearInterval(mrpStatusPollTimer)
+  mrpStatusPollTimer = null
+}
+
+const mrpRunStartedHandler = () => {
+  mrpStatus.value = 'running'
+  mrpErrors.value = []
+  startMrpStatusPolling()
+}
+
 const mrpRunCompleteHandler = () => {
+  stopMrpStatusPolling()
+  mrpStatus.value = 'idle'
+  mrpErrors.value = []
   currentStockLevels.value = {}
   toast.success('MRP data refreshed')
   executeAsyncQuery()
@@ -781,10 +835,14 @@ onMounted(async () => {
   }
   if (!presetLoaded) executeAsyncQuery()
   checkForecastCoverage()
+  call('erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status').then(applyMrpStatus)
+  window.frappe?.realtime?.on('mrp_run_started', mrpRunStartedHandler)
   window.frappe?.realtime?.on('mrp_run_complete', mrpRunCompleteHandler)
 })
 
 onUnmounted(() => {
+  stopMrpStatusPolling()
+  window.frappe?.realtime?.off('mrp_run_started', mrpRunStartedHandler)
   window.frappe?.realtime?.off('mrp_run_complete', mrpRunCompleteHandler)
 })
 
@@ -810,18 +868,19 @@ const last_mrp_run = createListResource({
 })
 
 const lastMrpRunTime = computed(() => {
-  if (last_mrp_run.list.loading) {
-    return 'Loading...'
-  }
-  if (!last_mrp_run.data || last_mrp_run.data.length === 0) {
+  if (mrpStatus.value === 'running') return 'MRP Running…'
+  if (mrpStatus.value === 'failed') return 'Last MRP Run: Failed'
+  if (last_mrp_run.list.loading) return 'Loading...'
+  if (!last_mrp_run.data || last_mrp_run.data.length === 0)
     return 'MRP has not run yet.'
-  }
-  const lastRun = last_mrp_run.data[0]
-  if (lastRun) {
-    const d = new Date(lastRun.creation)
-    return `Last MRP Run: ${d.toLocaleString()}`
-  }
-  return 'MRP has not run yet.'
+  const d = new Date(last_mrp_run.data[0].creation)
+  return `Last MRP Run: ${d.toLocaleString()}`
+})
+
+const mrpStatusClass = computed(() => {
+  if (mrpStatus.value === 'running') return 'text-blue-600 animate-pulse'
+  if (mrpStatus.value === 'failed') return 'text-red-600'
+  return 'text-gray-600'
 })
 
 const material_request_creator = createResource({
@@ -1034,6 +1093,10 @@ const columns = computed(() => {
       fixed: 'left',
       width: 400,
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_code'
+          ? sorterRef.value.order
+          : false,
       className: 'item-code-column',
       render: (row) => {
         if (row.type === 'HEADER') {
@@ -1119,6 +1182,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_name'
+          ? sorterRef.value.order
+          : false,
       render: (row) => (row.type === 'HEADER' ? row.item_name : ''),
     },
     {
@@ -1135,6 +1202,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_group'
+          ? sorterRef.value.order
+          : false,
 
       render: (row) => (row.type === 'HEADER' ? row.item_group : ''),
     },
@@ -1146,10 +1217,12 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'uom' ? sorterRef.value.order : false,
       render: (row) => (row.type === 'HEADER' ? row.uom : ''),
     },
     {
-      title: () => renderColumnTitle('BOM', 'bom_list'),
+      title: () => renderColumnTitle('Top-Level BOM', 'bom_list'),
       key: 'bom_list',
       filter: true,
       filterOptionValue:
@@ -1176,6 +1249,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'reorder_level'
+          ? sorterRef.value.order
+          : false,
       render: (row) =>
         row.type === 'HEADER' ? formatQuantity(row.reorder_level) : '',
     },
@@ -1194,6 +1271,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'reorder_quantity'
+          ? sorterRef.value.order
+          : false,
       render: (row) =>
         row.type === 'HEADER' ? formatQuantity(row.reorder_quantity) : '',
     },
@@ -1212,6 +1293,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'lead_time'
+          ? sorterRef.value.order
+          : false,
       render: (row) => (row.type === 'HEADER' ? formatTime(row.lead_time) : ''),
     },
     {
@@ -1228,6 +1313,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'default_supplier'
+          ? sorterRef.value.order
+          : false,
 
       render: (row) => {
         if (row.type !== 'HEADER') return ''
@@ -1239,7 +1328,6 @@ const columns = computed(() => {
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
-      defaultSortOrder: 'ascend',
       filter: true,
       filterOptionValue:
         appliedNumberFilters.days_to_reorder.min !== null ||
@@ -1252,6 +1340,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'days_to_reorder'
+          ? sorterRef.value.order
+          : false,
       render: (row) => {
         if (row.type !== 'HEADER') return ''
         return row.needs_reorder ? formatTime(row.days_to_reorder) : '—'
@@ -1274,6 +1366,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'days_to_reorder_excl_reorder_level'
+          ? sorterRef.value.order
+          : false,
       render: (row) => {
         if (row.type !== 'HEADER') return ''
         return row.needs_reorder_excl_reorder_level
@@ -1847,7 +1943,9 @@ function clearFilters() {
 
 function rerunMrp() {
   call('erpnext_mrp.mrp.tasks.mrp_run.trigger_mrp_run').then(() => {
-    toast.success('MRP Calculation Started')
+    mrpStatus.value = 'running'
+    mrpErrors.value = []
+    startMrpStatusPolling()
     showRerunDialog.value = true
   })
 }
