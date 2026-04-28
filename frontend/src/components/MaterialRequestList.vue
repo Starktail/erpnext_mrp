@@ -1034,6 +1034,10 @@ const columns = computed(() => {
       fixed: 'left',
       width: 400,
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_code'
+          ? sorterRef.value.order
+          : false,
       className: 'item-code-column',
       render: (row) => {
         if (row.type === 'HEADER') {
@@ -1119,6 +1123,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_name'
+          ? sorterRef.value.order
+          : false,
       render: (row) => (row.type === 'HEADER' ? row.item_name : ''),
     },
     {
@@ -1135,6 +1143,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'item_group'
+          ? sorterRef.value.order
+          : false,
 
       render: (row) => (row.type === 'HEADER' ? row.item_group : ''),
     },
@@ -1146,6 +1158,8 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'uom' ? sorterRef.value.order : false,
       render: (row) => (row.type === 'HEADER' ? row.uom : ''),
     },
     {
@@ -1176,6 +1190,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'reorder_level'
+          ? sorterRef.value.order
+          : false,
       render: (row) =>
         row.type === 'HEADER' ? formatQuantity(row.reorder_level) : '',
     },
@@ -1194,6 +1212,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'reorder_quantity'
+          ? sorterRef.value.order
+          : false,
       render: (row) =>
         row.type === 'HEADER' ? formatQuantity(row.reorder_quantity) : '',
     },
@@ -1212,6 +1234,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'lead_time'
+          ? sorterRef.value.order
+          : false,
       render: (row) => (row.type === 'HEADER' ? formatTime(row.lead_time) : ''),
     },
     {
@@ -1228,6 +1254,10 @@ const columns = computed(() => {
         tooltip: true,
       },
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'default_supplier'
+          ? sorterRef.value.order
+          : false,
 
       render: (row) => {
         if (row.type !== 'HEADER') return ''
@@ -1239,7 +1269,6 @@ const columns = computed(() => {
     {
       title: `${defaultTimeUnit.value} to Reorder (incl Safety)`,
       key: 'days_to_reorder',
-      defaultSortOrder: 'ascend',
       filter: true,
       filterOptionValue:
         appliedNumberFilters.days_to_reorder.min !== null ||
@@ -1252,6 +1281,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'days_to_reorder'
+          ? sorterRef.value.order
+          : false,
       render: (row) => {
         if (row.type !== 'HEADER') return ''
         return row.needs_reorder ? formatTime(row.days_to_reorder) : '—'
@@ -1274,6 +1307,10 @@ const columns = computed(() => {
       },
       align: 'right',
       sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'days_to_reorder_excl_reorder_level'
+          ? sorterRef.value.order
+          : false,
       render: (row) => {
         if (row.type !== 'HEADER') return ''
         return row.needs_reorder_excl_reorder_level
