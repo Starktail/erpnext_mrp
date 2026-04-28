@@ -1149,7 +1149,7 @@ const columns = computed(() => {
       render: (row) => (row.type === 'HEADER' ? row.uom : ''),
     },
     {
-      title: () => renderColumnTitle('BOM', 'bom_list'),
+      title: () => renderColumnTitle('Top-Level BOM', 'bom_list'),
       key: 'bom_list',
       filter: true,
       filterOptionValue:
