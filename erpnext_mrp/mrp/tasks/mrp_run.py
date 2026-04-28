@@ -9,6 +9,7 @@ from erpnext.controllers.accounts_controller import get_due_date, get_payment_te
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
 from frappe.utils import add_days, flt, getdate
+from frappe.utils.data import convert_utc_to_system_timezone
 from pypika import Order
 
 from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
@@ -16,7 +17,15 @@ from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
 
 @frappe.whitelist()
 def trigger_mrp_run():
-	frappe.get_doc("Scheduled Job Type", "mrp_run.mrp_run").enqueue(force=True)
+	from frappe.utils.background_jobs import is_job_enqueued
+
+	sj = frappe.get_cached_doc("Scheduled Job Type", "mrp_run.mrp_run")
+	if is_job_enqueued(sj.rq_job_id):
+		frappe.throw(_("An MRP run is already in progress. Please wait for it to complete."))
+	batch_jobs = _get_batch_jobs()
+	if any(j.status in ("queued", "started") for j in batch_jobs):
+		frappe.throw(_("An MRP run is already in progress. Please wait for it to complete."))
+	sj.enqueue(force=True)
 
 
 @frappe.whitelist()
@@ -66,6 +75,7 @@ def get_forecast_coverage_status() -> dict:
 
 
 def mrp_run(enqueue: bool = True):
+	_publish_mrp_run_started()
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
 
@@ -1460,16 +1470,70 @@ def _get_uom_conversion_factors(
 	return result
 
 
-def _publish_mrp_run_complete() -> None:
-	"""Notify all users with an MRP role so the Vue UI can refresh its data."""
-	import datetime
-
-	message = {"completed_at": datetime.now().isoformat()}
-	users = frappe.get_all(
+def _mrp_role_users() -> list[str]:
+	return frappe.get_all(
 		"Has Role",
 		filters={"role": ["in", ["MRP Manager", "MRP User"]], "parenttype": "User"},
 		pluck="parent",
 		distinct=True,
 	)
-	for user in users:
+
+
+def _publish_mrp_run_started() -> None:
+	message = {"started_at": datetime.now().isoformat()}
+	for user in _mrp_role_users():
+		frappe.publish_realtime(event="mrp_run_started", message=message, user=user)
+
+
+def _publish_mrp_run_complete() -> None:
+	message = {"completed_at": datetime.now().isoformat()}
+	for user in _mrp_role_users():
 		frappe.publish_realtime(event="mrp_run_complete", message=message, user=user)
+
+
+def _get_batch_jobs() -> list:
+	"""Fetch all RQ Job records for _finalise_item_batch; filter in Python (virtual doctype)."""
+	all_jobs = frappe.get_all("RQ Job", fields=["name", "job_name", "status", "creation", "exc_info"])
+	return [
+		j
+		for j in all_jobs
+		if j.job_name
+		in ["erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch", "erpnext_mrp.mrp.tasks.mrp_run.mrp_run"]
+	]
+
+
+@frappe.whitelist()
+def get_mrp_run_status() -> dict:
+	"""Return the current MRP run status for the UI status bar."""
+	last_log = frappe.get_all(
+		"Scheduled Job Log",
+		filters={"scheduled_job_type": "mrp_run.mrp_run"},
+		fields=["creation", "status", "details"],
+		order_by="creation desc",
+		limit=1,
+	)
+	if len(last_log) > 0:
+		last_run = last_log[0].creation
+
+		if last_log[0].status == "Failed":
+			errors = [(last_log[0].details or "")[:500]]
+			return {"status": "failed", "last_run": str(last_run), "errors": errors}
+
+		batch_jobs = _get_batch_jobs()
+
+		batch_jobs = [
+			job
+			for job in batch_jobs
+			if convert_utc_to_system_timezone(job.creation).replace(tzinfo=None)
+			>= last_run - timedelta(seconds=5)
+		]
+		if any(j.status in ("queued", "started") for j in batch_jobs):
+			return {"status": "running", "last_run": str(last_run), "errors": []}
+
+		failed = [j for j in batch_jobs if j.status == "failed"]
+
+		if failed:
+			errors = [{"job": f.name, "error": (f.exc_info or "")[:500]} for f in failed]
+			return {"status": "failed", "last_run": str(last_run), "errors": errors}
+
+	return {"status": "idle", "last_run": str(last_run), "errors": []}
