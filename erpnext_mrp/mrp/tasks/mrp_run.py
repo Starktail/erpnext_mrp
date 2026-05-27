@@ -882,139 +882,140 @@ def _finalise_item_batch(
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = _NO_REORDER_SENTINEL
 			mrp_entry_docs[0].needs_reorder_excl_reorder_level = 0
 
-		if price and price > 0:
-			for entry in mrp_entry_docs:
-				if entry.suggested_orders:
-					new_value = entry.suggested_orders * price
-					if entry.suggested_orders_value != new_value:
-						entry.suggested_orders_value = new_value
+		if not mrp_entry_docs[0].is_manufactured:
+			if price and price > 0:
+				for entry in mrp_entry_docs:
+					if entry.suggested_orders:
+						new_value = entry.suggested_orders * price
+						if entry.suggested_orders_value != new_value:
+							entry.suggested_orders_value = new_value
 
-		supplier_name = item_details.get("default_supplier") if item_details else None
-		payment_terms_template = supplier_payment_terms.get(supplier_name) if supplier_name else None
+			supplier_name = item_details.get("default_supplier") if item_details else None
+			payment_terms_template = supplier_payment_terms.get(supplier_name) if supplier_name else None
 
-		if supplier_name and payment_terms_template:
-			entry_map = {e.name: e for e in mrp_entry_docs}
-			for entry in mrp_entry_docs:
-				if entry.suggested_orders_value:
+			if supplier_name and payment_terms_template:
+				entry_map = {e.name: e for e in mrp_entry_docs}
+				for entry in mrp_entry_docs:
+					if entry.suggested_orders_value:
+						schedule = get_payment_terms(
+							payment_terms_template,
+							posting_date=entry.target_date,
+							grand_total=entry.suggested_orders_value,
+							base_grand_total=entry.suggested_orders_value,
+						)
+						if schedule:
+							for term in schedule:
+								base_date = None
+								payment_term_name = term.get("payment_term")
+								if payment_term_name:
+									custom_due_date_type = payment_term_details.get(
+										payment_term_name, {}
+									).get("custom_due_date")
+									if custom_due_date_type == "Order date":
+										base_date = entry.target_date
+									elif custom_due_date_type == "Shipment date":
+										base_date = add_days(
+											entry.target_date, item_details.get("primary_lead_time") or 0
+										)
+									elif custom_due_date_type == "Arrival date":
+										total_lead_time = (item_details.get("primary_lead_time") or 0) + (
+											item_details.get("additional_lead_time") or 0
+										)
+										base_date = add_days(entry.target_date, total_lead_time)
+									else:
+										base_date = entry.target_date
+								if base_date:
+									term.due_date = get_due_date(term, posting_date=base_date)
+								due_date = term.get("due_date")
+								payment_amount = term.get("payment_amount")
+								if due_date and payment_amount:
+									year, week, _day = getdate(due_date).isocalendar()
+									target_name = f"{item_code}-{year}CW{week:02d}"
+									target_entry = entry_map.get(target_name)
+									if target_entry:
+										target_entry.suggested_orders_value_payable = (
+											target_entry.suggested_orders_value_payable or 0
+										) + payment_amount
+									elif getdate(due_date) < mrp_entry_docs[0].target_date:
+										mrp_entry_docs[0].suggested_orders_value_payable = (
+											mrp_entry_docs[0].suggested_orders_value_payable or 0
+										) + payment_amount
+			else:
+				for entry in mrp_entry_docs:
+					entry.suggested_orders_value_payable = entry.suggested_orders_value
+
+			# Calculate Scheduled Receipts Payable using actual PO dates.
+			# Each open PO line is processed individually so its own transaction_date (order),
+			# schedule_date (shipment/ETD), and custom_expected_arrival_date (arrival/ETA) can be used
+			# as the base date for the matching payment term type.
+			item_po_lines = po_lines_by_item.get(item_code, [])
+
+			if supplier_name and payment_terms_template and item_po_lines:
+				entry_map = {e.name: e for e in mrp_entry_docs}
+				for po_line in item_po_lines:
+					remaining_value = po_line.get("remaining_value") or 0
+					if not remaining_value:
+						continue
+
+					order_date = (
+						getdate(po_line.get("transaction_date")) if po_line.get("transaction_date") else None
+					)
+					shipment_date = (
+						getdate(po_line.get("schedule_date")) if po_line.get("schedule_date") else None
+					)
+					arrival_date = (
+						getdate(po_line.get("custom_expected_arrival_date"))
+						if po_line.get("custom_expected_arrival_date")
+						else shipment_date
+					)
+					posting_date = arrival_date or shipment_date or order_date or date.today()
+
 					schedule = get_payment_terms(
 						payment_terms_template,
-						posting_date=entry.target_date,
-						grand_total=entry.suggested_orders_value,
-						base_grand_total=entry.suggested_orders_value,
+						posting_date=posting_date,
+						grand_total=remaining_value,
+						base_grand_total=remaining_value,
 					)
-					if schedule:
-						for term in schedule:
-							base_date = None
-							payment_term_name = term.get("payment_term")
-							if payment_term_name:
-								custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
-									"custom_due_date"
-								)
-								if custom_due_date_type == "Order date":
-									base_date = entry.target_date
-								elif custom_due_date_type == "Shipment date":
-									base_date = add_days(
-										entry.target_date, item_details.get("primary_lead_time") or 0
-									)
-								elif custom_due_date_type == "Arrival date":
-									total_lead_time = (item_details.get("primary_lead_time") or 0) + (
-										item_details.get("additional_lead_time") or 0
-									)
-									base_date = add_days(entry.target_date, total_lead_time)
-								else:
-									base_date = entry.target_date
-							if base_date:
-								term.due_date = get_due_date(term, posting_date=base_date)
-							due_date = term.get("due_date")
-							payment_amount = term.get("payment_amount")
-							if due_date and payment_amount:
-								year, week, _day = getdate(due_date).isocalendar()
-								target_name = f"{item_code}-{year}CW{week:02d}"
-								target_entry = entry_map.get(target_name)
-								if target_entry:
-									target_entry.suggested_orders_value_payable = (
-										target_entry.suggested_orders_value_payable or 0
-									) + payment_amount
-								elif getdate(due_date) < mrp_entry_docs[0].target_date:
-									mrp_entry_docs[0].suggested_orders_value_payable = (
-										mrp_entry_docs[0].suggested_orders_value_payable or 0
-									) + payment_amount
-		else:
-			for entry in mrp_entry_docs:
-				entry.suggested_orders_value_payable = entry.suggested_orders_value
+					if not schedule:
+						continue
 
-		# Calculate Scheduled Receipts Payable using actual PO dates.
-		# Each open PO line is processed individually so its own transaction_date (order),
-		# schedule_date (shipment/ETD), and custom_expected_arrival_date (arrival/ETA) can be used
-		# as the base date for the matching payment term type.
-		item_po_lines = po_lines_by_item.get(item_code, [])
+					for term in schedule:
+						base_date = None
+						payment_term_name = term.get("payment_term")
+						if payment_term_name:
+							custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
+								"custom_due_date"
+							)
+							if custom_due_date_type == "Order date":
+								base_date = order_date
+							elif custom_due_date_type == "Shipment date":
+								base_date = shipment_date
+							elif custom_due_date_type == "Arrival date":
+								base_date = arrival_date
+							else:
+								base_date = posting_date
 
-		if supplier_name and payment_terms_template and item_po_lines:
-			entry_map = {e.name: e for e in mrp_entry_docs}
-			for po_line in item_po_lines:
-				remaining_value = po_line.get("remaining_value") or 0
-				if not remaining_value:
-					continue
+						if base_date:
+							term.due_date = get_due_date(term, posting_date=base_date)
 
-				order_date = (
-					getdate(po_line.get("transaction_date")) if po_line.get("transaction_date") else None
-				)
-				shipment_date = (
-					getdate(po_line.get("schedule_date")) if po_line.get("schedule_date") else None
-				)
-				arrival_date = (
-					getdate(po_line.get("custom_expected_arrival_date"))
-					if po_line.get("custom_expected_arrival_date")
-					else shipment_date
-				)
-				posting_date = arrival_date or shipment_date or order_date or date.today()
+						due_date = term.get("due_date")
+						payment_amount = term.get("payment_amount")
+						if due_date and payment_amount:
+							year, week, _day = getdate(due_date).isocalendar()
+							target_name = f"{item_code}-{year}CW{week:02d}"
+							target_entry = entry_map.get(target_name)
+							if target_entry:
+								target_entry.scheduled_receipts_value_payable = (
+									target_entry.scheduled_receipts_value_payable or 0
+								) + payment_amount
+							elif getdate(due_date) < mrp_entry_docs[0].target_date:
+								mrp_entry_docs[0].scheduled_receipts_value_payable = (
+									mrp_entry_docs[0].scheduled_receipts_value_payable or 0
+								) + payment_amount
 
-				schedule = get_payment_terms(
-					payment_terms_template,
-					posting_date=posting_date,
-					grand_total=remaining_value,
-					base_grand_total=remaining_value,
-				)
-				if not schedule:
-					continue
-
-				for term in schedule:
-					base_date = None
-					payment_term_name = term.get("payment_term")
-					if payment_term_name:
-						custom_due_date_type = payment_term_details.get(payment_term_name, {}).get(
-							"custom_due_date"
-						)
-						if custom_due_date_type == "Order date":
-							base_date = order_date
-						elif custom_due_date_type == "Shipment date":
-							base_date = shipment_date
-						elif custom_due_date_type == "Arrival date":
-							base_date = arrival_date
-						else:
-							base_date = posting_date
-
-					if base_date:
-						term.due_date = get_due_date(term, posting_date=base_date)
-
-					due_date = term.get("due_date")
-					payment_amount = term.get("payment_amount")
-					if due_date and payment_amount:
-						year, week, _day = getdate(due_date).isocalendar()
-						target_name = f"{item_code}-{year}CW{week:02d}"
-						target_entry = entry_map.get(target_name)
-						if target_entry:
-							target_entry.scheduled_receipts_value_payable = (
-								target_entry.scheduled_receipts_value_payable or 0
-							) + payment_amount
-						elif getdate(due_date) < mrp_entry_docs[0].target_date:
-							mrp_entry_docs[0].scheduled_receipts_value_payable = (
-								mrp_entry_docs[0].scheduled_receipts_value_payable or 0
-							) + payment_amount
-
-		elif not (supplier_name and payment_terms_template):
-			for entry in mrp_entry_docs:
-				entry.scheduled_receipts_value_payable = entry.scheduled_receipts_value
+			elif not (supplier_name and payment_terms_template):
+				for entry in mrp_entry_docs:
+					entry.scheduled_receipts_value_payable = entry.scheduled_receipts_value
 
 		for entry in mrp_entry_docs:
 			entry.total_payable = (entry.suggested_orders_value_payable or 0) + (
