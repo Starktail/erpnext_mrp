@@ -75,9 +75,24 @@ def get_forecast_coverage_status() -> dict:
 
 
 def mrp_run(enqueue: bool = True):
+	# Guard against overlapping runs
+	if enqueue and _finalise_jobs_in_progress():
+		frappe.logger("mrp_run").warning(
+			"Skipping MRP run: a previous run's finalise jobs are still in progress."
+		)
+		return
 	_publish_mrp_run_started()
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
+
+
+def _finalise_jobs_in_progress() -> bool:
+	"""True if any _finalise_item_batch job from a previous run is still queued or running."""
+	return any(
+		j.status in ("queued", "started")
+		for j in _get_batch_jobs()
+		if j.job_name == "erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch"
+	)
 
 
 def create_mrp_item_entries():
@@ -774,6 +789,7 @@ def _calculate_suggested_receipts_batch(
 				(entry.on_hand_inventory_no_action or 0) - demand + (entry.scheduled_receipts or 0)
 			)
 
+		# Use save() here so the row's metadata (modified/modified_by) and fetch_from fields materialise
 		for entry in mrp_entry_docs:
 			entry.save()
 
@@ -1021,7 +1037,7 @@ def _finalise_item_batch(
 			entry.total_payable = (entry.suggested_orders_value_payable or 0) + (
 				entry.scheduled_receipts_value_payable or 0
 			)
-			entry.save()
+			entry.db_update()
 
 	if total_batches > 1:
 		try:
