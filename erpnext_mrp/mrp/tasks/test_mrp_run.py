@@ -645,6 +645,103 @@ class TestMRPRun(FrappeTestCase):
 		# TODO: change assert to stock level check
 		# self.assertEqual(mrp_entries[0].urgency_level, 0, "Expected an urgency_level of 0")
 
+	def test_finalise_does_not_clobber_on_hand(self, mock_date):
+		"""
+		Regression for the batch race that left in-stock items showing 0 on hand.
+		"""
+		test_start_day = datetime.date(2026, 1, 22)
+		mock_date.today.return_value = test_start_day
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZLONG123'"
+		mrp_settings.look_ahead = 4
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.save()
+
+		# Starting stock of 130 - the receipts phase should persist this as on_hand.
+		make_stock_entry(
+			item_code="SRZLONG123",
+			posting_date=add_days(test_start_day, -1),
+			qty=130,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = frappe.get_all(
+			"MRP Entry", filters={"item_code": "SRZLONG123", "is_header": 1}, pluck="name"
+		)[0]
+		self.assertEqual(
+			frappe.db.get_value("MRP Entry", header, "on_hand_inventory"),
+			130,
+			"receipts phase should have written the current stock as on_hand",
+		)
+
+		# Simulate a finalise worker that loaded its rows before the receipts commit:
+		# the DB has 130 but every MRP Entry it reads still shows the stale 0.
+		real_get_doc = mrp_run_module.frappe.get_doc
+
+		def stale_get_doc(*args, **kwargs):
+			doc = real_get_doc(*args, **kwargs)
+			if args and args[0] == "MRP Entry":
+				doc.on_hand_inventory = 0
+				doc.on_hand_inventory_excl_reorder_level = 0
+				doc.on_hand_inventory_no_action = 0
+			return doc
+
+		item_details_map = mrp_run_module._get_all_item_details()
+		with patch.object(mrp_run_module.frappe, "get_doc", side_effect=stale_get_doc):
+			mrp_run_module._finalise_suggestions(
+				stock_levels=[], item_details_map=item_details_map, enqueue=False
+			)
+
+		self.assertEqual(
+			frappe.db.get_value("MRP Entry", header, "on_hand_inventory"),
+			130,
+			"finalise must not overwrite on_hand_inventory written by the receipts phase",
+		)
+
+	def test_finalise_batches_enqueued_after_commit(self, mock_date):
+		"""
+		The finalise batches must be enqueued with enqueue_after_commit=True.
+		"""
+		test_start_day = datetime.date(2026, 1, 22)
+		mock_date.today.return_value = test_start_day
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZLONG123'"
+		mrp_settings.look_ahead = 4
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.save()
+
+		make_stock_entry(
+			item_code="SRZLONG123",
+			posting_date=add_days(test_start_day, -1),
+			qty=130,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=1,
+			purpose="Material Receipt",
+		)
+
+		create_mrp_item_entries()
+		with patch.object(mrp_run_module.frappe, "enqueue") as mock_enqueue:
+			process_mrp_item_entries(enqueue=True)
+
+		finalise_calls = [
+			call
+			for call in mock_enqueue.call_args_list
+			if call.args and "_finalise_item_batch" in call.args[0]
+		]
+		self.assertTrue(finalise_calls, "expected the finalise batches to be enqueued")
+		for call in finalise_calls:
+			self.assertTrue(
+				call.kwargs.get("enqueue_after_commit"),
+				"finalise batches must be enqueued with enqueue_after_commit=True",
+			)
+
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable(self, mock_date):
 		"""
 		Test that MRP Entry record has correct Suggested Orders Value Payable.
