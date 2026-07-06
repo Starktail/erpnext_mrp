@@ -4,6 +4,19 @@ from datetime import date, datetime, timedelta
 
 _NO_REORDER_SENTINEL = 9999
 
+# Fields to be persisted in _finalise_item_batch only
+_FINALISE_OWNED_FIELDS = (
+	"suggested_orders",
+	"suggested_orders_value",
+	"suggested_orders_value_payable",
+	"scheduled_receipts_value_payable",
+	"total_payable",
+	"days_to_reorder",
+	"needs_reorder",
+	"days_to_reorder_excl_reorder_level",
+	"needs_reorder_excl_reorder_level",
+)
+
 import frappe
 from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
@@ -1113,7 +1126,12 @@ def _finalise_item_batch(
 			entry.total_payable = (entry.suggested_orders_value_payable or 0) + (
 				entry.scheduled_receipts_value_payable or 0
 			)
-			entry.db_update()
+			frappe.db.set_value(
+				"MRP Entry",
+				entry.name,
+				{field: entry.get(field) for field in _FINALISE_OWNED_FIELDS},
+				update_modified=False,
+			)
 
 	if total_batches > 1:
 		try:
@@ -1381,6 +1399,7 @@ def _finalise_suggestions(
 			frappe.enqueue(
 				"erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch",
 				queue="long",
+				enqueue_after_commit=True,
 				item_codes=batch_codes,
 				item_details_map=batch_map,
 				stock_levels=stock_levels,
