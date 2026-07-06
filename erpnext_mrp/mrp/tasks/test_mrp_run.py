@@ -9,6 +9,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
 
+from erpnext_mrp.mrp.tasks import mrp_run as mrp_run_module
 from erpnext_mrp.mrp.tasks.mrp_run import (
 	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
@@ -755,6 +756,82 @@ class TestMRPRun(FrappeTestCase):
 		item_payable_date = add_to_date(final_item_so_date, days=14)
 		mrp_entry_of_payable = get_mrp_entry_by_item_week("SRZ11111", item_payable_date)
 		self.assertEqual(mrp_entry_of_payable.suggested_orders_value_payable, 20)
+
+	def test_finalise_is_idempotent_over_the_same_rows(self, mock_date):
+		"""
+		Re-running the suggestion/finalise pass over rows that were NOT rebuilt must not change any
+		value. This is the regression guard for the accumulation bug where suggested_orders and the
+		*_value_payable fields were added to (never reset), inflating by n(n+1)/2 on repeated passes.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		# Supplier with a 14-day term so the payable lands in a later period (exercises the
+		# additive payable code path, not just the same-period shortcut).
+		frappe.db.set_value("Supplier", "_Test Supplier", "payment_terms", "_Test 14 days after invoice")
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.lead_time_days = 0
+		item.additional_shipping_days = 0
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.default_supplier = "_Test Supplier"
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		price = frappe.new_doc("Item Price")
+		price.item_code = "SRZ11111"
+		price.price_list_rate = 2
+		price.price_list = "Standard Buying"
+		price.valid_from = test_start_day
+		price.save()
+
+		final_item_so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(
+			item_code="SRZ11111", qty=10, delivery_date=final_item_so_date, transaction_date=test_start_day
+		)
+
+		# First full pass: scaffold + process.
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		accumulating_fields = [
+			"suggested_orders",
+			"suggested_orders_value",
+			"suggested_orders_value_payable",
+			"scheduled_receipts_value_payable",
+			"total_payable",
+		]
+		after_first = {
+			e.name: {f: e.get(f) for f in accumulating_fields}
+			for e in frappe.get_all(
+				"MRP Entry",
+				filters={"item_code": "SRZ11111"},
+				fields=["name", *accumulating_fields],
+			)
+		}
+		# Sanity: the first pass actually produced a non-zero suggestion to inflate.
+		self.assertTrue(any(v["suggested_orders"] for v in after_first.values()))
+
+		# Second pass over the SAME rows (no create_mrp_item_entries) — simulates a duplicate
+		# finalise / overlapping run hitting rows that were never cleared.
+		process_mrp_item_entries(enqueue=False)
+
+		after_second = {
+			e.name: {f: e.get(f) for f in accumulating_fields}
+			for e in frappe.get_all(
+				"MRP Entry",
+				filters={"item_code": "SRZ11111"},
+				fields=["name", *accumulating_fields],
+			)
+		}
+
+		self.assertEqual(after_first, after_second, "Finalise must be idempotent across repeated passes")
 
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_split_terms(self, mock_date):
 		"""
@@ -2564,3 +2641,76 @@ def _ensure_payment_terms_for_actual_dates():
 				],
 			}
 		).insert()
+
+
+class TestMRPFinaliseGuard(FrappeTestCase):
+	"""
+	Unit tests for _finalise_in_progress(): the stateless, age-filtered, fail-open run guard.
+	The queue read (_get_batch_jobs) and the tz conversion are patched so the decision logic is
+	tested deterministically without a live RQ worker.
+	"""
+
+	JOB_NAME = "erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch"
+
+	def setUp(self):
+		super().setUp()
+		# Remove any pre-existing logs so the "most recent run" is the one we set up.
+		frappe.db.delete("Scheduled Job Log", {"scheduled_job_type": "mrp_run.mrp_run"})
+
+	def _set_last_run(self, when):
+		log = frappe.get_doc(
+			{"doctype": "Scheduled Job Log", "scheduled_job_type": "mrp_run.mrp_run", "status": "Complete"}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("Scheduled Job Log", log.name, "creation", when, update_modified=False)
+
+	def _job(self, status, creation):
+		return frappe._dict(
+			{"name": "job1", "job_name": self.JOB_NAME, "status": status, "creation": creation}
+		)
+
+	def test_no_previous_run_is_not_in_progress(self):
+		with patch.object(mrp_run_module, "_get_batch_jobs", return_value=[]):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
+
+	def test_live_recent_batch_is_in_progress(self):
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("started", now - datetime.timedelta(minutes=5))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (True, False))
+
+	def test_ancient_phantom_job_is_ignored(self):
+		# A queued job created BEFORE the most recent run must not block it (the original deadlock).
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("queued", now - datetime.timedelta(minutes=100))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
+
+	def test_wedged_job_past_ceiling_is_stale(self):
+		# In-progress but older than the ceiling -> (True, True): proceed anyway + alert.
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=200))
+		age = mrp_run_module.MRP_FINALISE_CEILING_MINUTES + 30
+		jobs = [self._job("started", now - datetime.timedelta(minutes=age))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (True, True))
+
+	def test_finished_jobs_do_not_count(self):
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("finished", now - datetime.timedelta(minutes=5))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))

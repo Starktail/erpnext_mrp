@@ -8,7 +8,7 @@ import frappe
 from erpnext.controllers.accounts_controller import get_due_date, get_payment_terms
 from erpnext.stock.report.stock_balance.stock_balance import execute as execute_stock_balance_report
 from frappe import _
-from frappe.utils import add_days, flt, getdate
+from frappe.utils import add_days, flt, get_datetime, getdate, now_datetime
 from frappe.utils.data import convert_utc_to_system_timezone
 from pypika import Order
 
@@ -22,9 +22,11 @@ def trigger_mrp_run():
 	sj = frappe.get_cached_doc("Scheduled Job Type", "mrp_run.mrp_run")
 	if is_job_enqueued(sj.rq_job_id):
 		frappe.throw(_("An MRP run is already in progress. Please wait for it to complete."))
-	batch_jobs = _get_batch_jobs()
-	if any(j.status in ("queued", "started") for j in batch_jobs):
-		frappe.throw(_("An MRP run is already in progress. Please wait for it to complete."))
+	in_progress, _stale = _finalise_in_progress()
+	if in_progress:
+		frappe.throw(
+			_("The previous run's finalise jobs are still processing. Please wait for them to complete.")
+		)
 	sj.enqueue(force=True)
 
 
@@ -74,33 +76,94 @@ def get_forecast_coverage_status() -> dict:
 	}
 
 
+# If the previous run's finalise batches have been "in progress" longer than this, treat them as
+# dead (e.g. the long-queue worker is down) and rebuild anyway rather than block forever.
+MRP_FINALISE_CEILING_MINUTES = 120
+
+
 def mrp_run(enqueue: bool = True):
 	# Guard against overlapping runs
-	if enqueue and _finalise_jobs_in_progress():
-		frappe.logger("mrp_run").warning(
-			"Skipping MRP run: a previous run's finalise jobs are still in progress."
-		)
-		return
+	if enqueue:
+		in_progress, stale = _finalise_in_progress()
+		if in_progress and not stale:
+			frappe.logger("mrp_run").info(
+				"Skipping MRP run: the previous run's finalise jobs are still in progress."
+			)
+			return
+		if stale:
+			frappe.log_error(
+				title="MRP: forcing a run over a previous finalise",
+				message=(
+					"The previous run's finalise jobs exceeded "
+					f"{MRP_FINALISE_CEILING_MINUTES} minutes; rebuilding anyway."
+				),
+			)
+			_notify_mrp_role(
+				_(
+					"MRP: the previous run appears stuck; forcing a fresh run. "
+					"Please check the long-queue workers."
+				)
+			)
 	_publish_mrp_run_started()
 	create_mrp_item_entries()
 	process_mrp_item_entries(enqueue=enqueue)
 
 
-def _finalise_jobs_in_progress() -> bool:
-	"""True if any _finalise_item_batch job from a previous run is still queued or running."""
-	return any(
-		j.status in ("queued", "started")
-		for j in _get_batch_jobs()
-		if j.job_name == "erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch"
+def _finalise_in_progress() -> tuple[bool, bool]:
+	"""Read live queue state for the previous run's finalise batches.
+
+	Returns ``(in_progress, stale)``:
+	  - ``in_progress`` -- a ``_finalise_item_batch`` job from the most recent run is queued or started.
+	  - ``stale`` -- such jobs exist but the youngest is older than the ceiling, i.e. dead.
+	"""
+	last_run = frappe.db.get_value(
+		"Scheduled Job Log",
+		{"scheduled_job_type": "mrp_run.mrp_run"},
+		"creation",
+		order_by="creation desc",
 	)
+	if not last_run:
+		return (False, False)
+
+	cutoff = get_datetime(last_run) - timedelta(seconds=5)
+	now = now_datetime()
+
+	live_creations = []
+	for j in _get_batch_jobs():
+		if j.job_name != "erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch":
+			continue
+		if j.status not in ("queued", "started"):
+			continue
+		created = convert_utc_to_system_timezone(j.creation).replace(tzinfo=None)
+		if created < cutoff:
+			continue  # belongs to an older run -> ignore (age filter)
+		live_creations.append(created)
+
+	if not live_creations:
+		return (False, False)
+
+	stale = (now - max(live_creations)).total_seconds() > MRP_FINALISE_CEILING_MINUTES * 60
+	return (True, stale)
+
+
+def _notify_mrp_role(message: str) -> None:
+	"""Best-effort toast to MRP-role users; the durable record is the Error Log / logger."""
+	for user in _mrp_role_users():
+		frappe.publish_realtime(
+			"msgprint",
+			{"message": message, "title": _("MRP"), "indicator": "orange"},
+			user=user,
+		)
 
 
 def create_mrp_item_entries():
 	"""
 	Calculate BOM levels and create MRP Entry records for each item for each week in a look-ahead period.
 
-	This function is idempotent: it clears all existing MRP Entry records before inserting
-	the newly calculated levels. The BOM level is determined by the deepest nesting level of an item in all **default** BOMs.
+	This function performs a full rebuild: it computes the complete new row set first, then
+	clears all existing MRP Entry records (committing the delete so it is durable) and bulk
+	inserts the fresh set. The BOM level is determined by the deepest nesting level of an item
+	in all **default** BOMs.
 	- Level 0: Top-level items that are not used as components in any other default BOM.
 	- Level n: Components that are n levels deep in a default BOM hierarchy.
 
@@ -108,9 +171,6 @@ def create_mrp_item_entries():
 
 	We use frappe.db.sql because WITH RECURSIVE is a special construct that frappe.qb/pypika do not expose.
 	"""
-	# 1. Clear all existing records from the MRP Entry table
-	frappe.db.delete("MRP Entry")
-
 	settings = frappe.get_cached_doc("MRP Settings")
 	lead_time_field = "lead_time_days"
 	if settings.item_lead_time_field:
@@ -248,7 +308,12 @@ def create_mrp_item_entries():
 		(*row[:4], row[4] if period_data[0][0] in row[0] else None, *row[5:]) for row in final_values
 	]
 
-	# 6. Perform a bulk insert of all generated records
+	# 6. Clear the table and rebuild
+	frappe.db.delete("MRP Entry")
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep
+
+	# 7. Bulk insert the fresh records
 	frappe.db.bulk_insert(
 		"MRP Entry",
 		fields=[
@@ -264,8 +329,19 @@ def create_mrp_item_entries():
 			"creation",
 		],
 		values=final_values,
-		ignore_duplicates=True,
 	)
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep
+
+	# 8. Invariant: every active item must have exactly one Period-0 (is_header=1) row, or it
+	# disappears from the MRP view entirely. Surface a mismatch instead of failing the whole run.
+	header_count = frappe.db.count("MRP Entry", {"is_header": 1})
+	item_count = len({row[1] for row in final_values})
+	if header_count != item_count:
+		frappe.log_error(
+			title="MRP rebuild: header/item count mismatch",
+			message=f"{header_count} Period-0 headers for {item_count} active items after rebuild.",
+		)
 
 
 def process_mrp_item_entries(enqueue: bool):
