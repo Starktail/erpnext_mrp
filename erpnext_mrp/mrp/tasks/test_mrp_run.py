@@ -9,6 +9,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date
 
+from erpnext_mrp.mrp.tasks import mrp_run as mrp_run_module
 from erpnext_mrp.mrp.tasks.mrp_run import (
 	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
@@ -2564,3 +2565,76 @@ def _ensure_payment_terms_for_actual_dates():
 				],
 			}
 		).insert()
+
+
+class TestMRPFinaliseGuard(FrappeTestCase):
+	"""
+	Unit tests for _finalise_in_progress(): the stateless, age-filtered, fail-open run guard.
+	The queue read (_get_batch_jobs) and the tz conversion are patched so the decision logic is
+	tested deterministically without a live RQ worker.
+	"""
+
+	JOB_NAME = "erpnext_mrp.mrp.tasks.mrp_run._finalise_item_batch"
+
+	def setUp(self):
+		super().setUp()
+		# Remove any pre-existing logs so the "most recent run" is the one we set up.
+		frappe.db.delete("Scheduled Job Log", {"scheduled_job_type": "mrp_run.mrp_run"})
+
+	def _set_last_run(self, when):
+		log = frappe.get_doc(
+			{"doctype": "Scheduled Job Log", "scheduled_job_type": "mrp_run.mrp_run", "status": "Complete"}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("Scheduled Job Log", log.name, "creation", when, update_modified=False)
+
+	def _job(self, status, creation):
+		return frappe._dict(
+			{"name": "job1", "job_name": self.JOB_NAME, "status": status, "creation": creation}
+		)
+
+	def test_no_previous_run_is_not_in_progress(self):
+		with patch.object(mrp_run_module, "_get_batch_jobs", return_value=[]):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
+
+	def test_live_recent_batch_is_in_progress(self):
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("started", now - datetime.timedelta(minutes=5))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (True, False))
+
+	def test_ancient_phantom_job_is_ignored(self):
+		# A queued job created BEFORE the most recent run must not block it (the original deadlock).
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("queued", now - datetime.timedelta(minutes=100))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
+
+	def test_wedged_job_past_ceiling_is_stale(self):
+		# In-progress but older than the ceiling -> (True, True): proceed anyway + alert.
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=200))
+		age = mrp_run_module.MRP_FINALISE_CEILING_MINUTES + 30
+		jobs = [self._job("started", now - datetime.timedelta(minutes=age))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (True, True))
+
+	def test_finished_jobs_do_not_count(self):
+		now = frappe.utils.now_datetime()
+		self._set_last_run(now - datetime.timedelta(minutes=10))
+		jobs = [self._job("finished", now - datetime.timedelta(minutes=5))]
+		with (
+			patch.object(mrp_run_module, "convert_utc_to_system_timezone", side_effect=lambda dt: dt),
+			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
+		):
+			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
