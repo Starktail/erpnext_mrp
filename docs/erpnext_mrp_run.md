@@ -11,7 +11,10 @@ The `MRP Settings` doctype allows you to configure various parameters for the MR
 -   **Custom Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
 -   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
 -   **Custom Purchase Order Item Delivery Date Field**: This setting allows you to select a mandatory Date DocField from the `Purchase Order Item` doctype. This field will be used as the delivery date for calculating `Ordered Qty` in the MRP run. By default, `schedule_date` is used.
+-   **Custom Purchase Order Item Shipment Date Field**: Selects the `Purchase Order Item` Date DocField that anchors payment terms with a Due Date of **Shipment date**. Unlike the delivery date field above, optional Date fields can be selected here, because the date a delay is tracked on is often not a mandatory field. By default, `schedule_date` is used. If the selected field is empty on a PO line, that line falls back to `schedule_date`.
+-   **Custom Purchase Order Item Arrival Date Field**: Selects the `Purchase Order Item` Date DocField that anchors payment terms with a Due Date of **Arrival date**. By default, `custom_expected_arrival_date` is used. If the selected field is empty on a PO line, that line falls back to the shipment date.
 -   **Custom Re-order Qty Item Field**: Here you can select another `Item` DocField to be used as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field.
+-   **Only Suggest Orders That Can Arrive In Time**: When enabled, a shortage is only suggested from the first period an order placed today could actually be received in, based on the item's lead time. Earlier shortfalls carry forward and are netted against the Purchase Orders already inbound, so MRP stops proposing stock the pipeline will deliver first. Disabled by default, which suggests every shortage in the period it occurs regardless of lead time.
 -   **Assume Remaining Quantity**: When calculating scheduled receipts from open Purchase Orders, this setting determines whether to include partially received order items. If enabled, the remaining unreceived quantity is considered as expected supply. If disabled, partially received items are ignored.
 
 #### Variables/Measures Display Settings
@@ -85,6 +88,8 @@ For each item at this level, the system calculates how much needs to be produced
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
 5. **Projected Inventory**: `on_hand_inventory − demand + scheduled_receipts + suggested_receipts`
 
+If **Only Suggest Orders That Can Arrive In Time** is enabled, step 4 is skipped for any period earlier than the item's lead time allows - an order placed today cannot be received before then. The shortfall is not discarded: it flows into `Projected On Hand Inventory` and carries forward as the next period's opening stock, so the first period that *can* be filled sees the accumulated deficit netted against every open Purchase Order arriving in between. If the pipeline has already covered the gap by that point, nothing is suggested at all. Items whose lead time extends past the end of the look-ahead horizon have their requirement placed in the final period, so it still surfaces rather than disappearing.
+
 **Step 3 — Net demand explosion (all levels except the last)**
 
 Once `Suggested Receipts` is known for the current level, that quantity is exploded down to child components:
@@ -106,19 +111,21 @@ After all levels have been processed, the system computes the output and action 
     - **Suggested Orders Value**: Calculates the estimated cost of the `Suggested Orders` using a three-step price lookup:
         1. **Supplier-specific price** — an `Item Price` record where `supplier` matches the item's default supplier, in the currency of the configured buying price list, with a valid date range.
         2. **Buying price list** — if no supplier-specific price exists, the most recently valid `Item Price` on the price list configured in **Buying Settings → Buying Price List**, filtered to the correct currency and date range.
-        3. **Valuation rate fallback** — if no `Item Price` is found, the item's average bin valuation rate is used, falling back to `Item.valuation_rate`.
+        3. **Valuation rate fallback** — if no `Item Price` is found, the item's stock valuation rate is used, averaged across the warehouses holding it and weighted by the quantity in each, so a small sample stocked at an unusual rate cannot skew the projection. Falls back to `Item.valuation_rate` when no warehouse holds stock.
         Prices in a UoM other than the item's stock UoM are automatically converted using the item's UoM conversion table (or the global UOM Conversion Factor table).
     - **Suggested Orders Payable**: Projects the cash outflow for not-yet-placed orders based on the default Supplier's **Payment Terms**. The due date is calculated relative to the week in which the order would be placed.
     - **Scheduled Receipts Value**: Calculates the base-currency value of open Purchase Order lines due in each period, using `(remaining qty × base_rate)` from each PO line. This reflects committed spend already on order.
     - **Scheduled Receipts Payable**: Projects the cash outflow for open Purchase Orders by processing each PO line individually using its actual dates. The base date for each payment term type is taken directly from the PO:
         - **Order date**: uses `po.transaction_date` (the actual date the PO was placed).
-        - **Shipment date**: uses `po_item.schedule_date` (the actual ETD on the PO line).
-        - **Arrival date**: uses `po_item.custom_expected_arrival_date` (the actual ETA on the PO line), falling back to `schedule_date` if absent.
+        - **Shipment date**: uses the field selected in **Custom Purchase Order Item Shipment Date Field** (`schedule_date` by default), falling back to `schedule_date` if that field is empty on the line.
+        - **Arrival date**: uses the field selected in **Custom Purchase Order Item Arrival Date Field** (`custom_expected_arrival_date` by default), falling back to the shipment date if absent.
+
+        Both anchors are configurable because `schedule_date` records what the supplier originally committed to. Sites that track slipping orders on a separate field (for example `expected_delivery_date`) can point the anchors at it, so instalments for a delayed PO move to the week the goods are now expected instead of staying on the original date.
     - **Total Payable**: The sum of `Scheduled Receipts Payable` and `Suggested Orders Payable` — the complete projected cash requirement for the period.
     - **Custom Due Dates**: The system supports dynamic due dates on the `Payment Term` doctype. This allows you to split payments based on milestones:
         - **Order date**: The payment for suggested orders is calculated relative to when the order is placed; for open POs, the actual `transaction_date` is used.
-        - **Shipment date**: The payment for suggested orders is calculated relative to the order date + primary lead time; for open POs, the actual `schedule_date` (ETD) is used.
-        - **Arrival date**: The payment for suggested orders is calculated relative to the order date + total lead time; for open POs, the actual `custom_expected_arrival_date` (ETA) is used.
+        - **Shipment date**: The payment for suggested orders is calculated relative to the order date + primary lead time; for open POs, the configured shipment date field on the PO line is used.
+        - **Arrival date**: The payment for suggested orders is calculated relative to the order date + total lead time; for open POs, the configured arrival date field on the PO line is used.
         - If no custom due date is set on the payment term, the system defaults to the posting date of the document.
     - If no supplier or payment terms are configured for an item, all payable amounts default to the same period as the order or delivery.
 
@@ -149,7 +156,7 @@ The following are the key fields calculated for each item in each period:
 | `suggested_orders_value`        | The estimated value of the suggested orders. Only populated for purchased items (items without an active default BOM).                                                |
 | `suggested_orders_value_payable`| Projected cash outflow for not-yet-placed orders, distributed by the supplier's payment terms. Only populated for purchased items.                                    |
 | `scheduled_receipts_value`      | Base-currency value of open Purchase Order lines due in this period: `SUM((qty − received_qty) × base_rate)`. Only populated for purchased items.                     |
-| `scheduled_receipts_value_payable` | Projected cash outflow for open Purchase Orders, distributed by the supplier's payment terms using the actual PO dates (`transaction_date`, `schedule_date`, or `custom_expected_arrival_date`) per payment term type. Only populated for purchased items. |
+| `scheduled_receipts_value_payable` | Projected cash outflow for open Purchase Orders, distributed by the supplier's payment terms using the actual PO dates (`transaction_date`, plus the configured shipment and arrival date fields) per payment term type. Only populated for purchased items. |
 | `total_payable`                 | Combined projected cash outflow: `scheduled_receipts_value_payable + suggested_orders_value_payable`. Only populated for purchased items.                             |
 | **Urgency Indicators** (header period only) | |
 | `days_to_reorder`               | Days until the order must be placed, accounting for lead time and safety stock. Negative = already late. Blank (`—`) when no shortage is projected across the entire horizon. |

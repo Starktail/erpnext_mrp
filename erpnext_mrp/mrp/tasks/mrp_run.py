@@ -799,10 +799,21 @@ def _calculate_suggested_receipts_batch(
 	requirement_based_on: str,
 ) -> None:
 	grouped_mrp_entries = _fetch_grouped_mrp_entries(item_codes)
+	defer_within_lead_time = bool(frappe.get_cached_doc("MRP Settings").defer_suggestions_within_lead_time)
 
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
+
+		# Nothing ordered today can arrive before the lead time has elapsed, so a shortage in an
+		# earlier period is deferred to the first period that could actually be filled. The
+		# shortfall is not lost: it carries forward through projected on hand, so the deferred
+		# period nets it against whatever the open Purchase Orders deliver in the meantime.
+		first_fillable_index = 0
+		if defer_within_lead_time:
+			first_fillable_index = min(
+				math.ceil((mrp_entry_docs[0].lead_time or 0) / 7), len(mrp_entry_docs) - 1
+			)
 
 		mrp_entry_docs[0].on_hand_inventory = sum(
 			sl.bal_qty for sl in stock_levels if sl.item_code == item_code
@@ -848,7 +859,7 @@ def _calculate_suggested_receipts_batch(
 				+ (entry.scheduled_receipts or 0)
 				- (entry.reorder_level or 0)
 			)
-			if shortage < 0:
+			if shortage < 0 and index >= first_fillable_index:
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts = math.ceil(-shortage / moq) * moq
 
@@ -863,7 +874,7 @@ def _calculate_suggested_receipts_batch(
 			shortage_excl = (
 				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
 			)
-			if shortage_excl < 0:
+			if shortage_excl < 0 and index >= first_fillable_index:
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts_excl_reorder_level = math.ceil(-shortage_excl / moq) * moq
 
@@ -883,6 +894,17 @@ def _calculate_suggested_receipts_batch(
 			entry.save()
 
 
+def _resolve_po_item_date_column(setting_value: str | None, default: str | None = None) -> str | None:
+	"""
+	Resolve an MRP Settings field selection ("fieldname | Label") to a column on
+	'Purchase Order Item'
+	"""
+	for fieldname in ((setting_value or "").split("|")[0].strip(), default):
+		if fieldname and frappe.db.has_column("Purchase Order Item", fieldname):
+			return fieldname
+	return None
+
+
 def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frappe._dict]]:
 	if not item_codes:
 		return {}
@@ -894,18 +916,22 @@ def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frap
 
 	placeholders = ", ".join([frappe.db.escape(c) for c in item_codes])
 
-	arrival_date_col = (
-		"po_item.custom_expected_arrival_date"
-		if frappe.db.has_column("Purchase Order Item", "custom_expected_arrival_date")
-		else "NULL"
+	# The dates anchoring the payment terms are configurable, because the date a supplier
+	# originally committed to is not always the date the delay is tracked on.
+	shipment_date_field = _resolve_po_item_date_column(settings.po_item_shipment_date_field, "schedule_date")
+	arrival_date_field = _resolve_po_item_date_column(
+		settings.po_item_arrival_date_field, "custom_expected_arrival_date"
 	)
+	shipment_date_col = f"po_item.`{shipment_date_field}`" if shipment_date_field else "NULL"
+	arrival_date_col = f"po_item.`{arrival_date_field}`" if arrival_date_field else "NULL"
 
 	sql_query = f"""# nosemgrep: frappe-sql-format-injection
         SELECT
             po_item.item_code,
             po.transaction_date,
             po_item.schedule_date,
-            {arrival_date_col} AS custom_expected_arrival_date,
+            {shipment_date_col} AS shipment_date,
+            {arrival_date_col} AS arrival_date,
             (po_item.qty - po_item.received_qty) * po_item.base_rate AS remaining_value
         FROM `tabPurchase Order Item` AS po_item
         JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
@@ -923,6 +949,42 @@ def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frap
 	for row in rows:
 		grouped.setdefault(row.item_code, []).append(row)
 	return grouped
+
+
+def _first_requirement_date(mrp_entry_docs: list, include_reorder_level: bool):
+	"""
+	The date the material is first needed, which is not necessarily the period the suggested
+	receipt is booked in: deferring a suggestion to the first period the lead time allows moves
+	the receipt, not the date the demand exists. Reorder urgency has to be measured against the
+	demand, otherwise a deferred requirement looks less overdue than it is.
+
+	Up to the first shortage the projection without suggested orders is identical to the one
+	with them, so its first dip below the safety stock floor is that shortage. Returns None when
+	no dip is found, leaving the caller to fall back to the receipt's own period.
+	"""
+	for entry in mrp_entry_docs:
+		floor = (entry.reorder_level or 0) if include_reorder_level else 0
+		if (entry.projected_on_hand_inventory_no_action or 0) < floor:
+			return entry.target_date
+	return None
+
+
+def _get_fallback_valuation_rate(item_code: str, stock_levels: list) -> float:
+	"""
+	Average valuation rate across the warehouses holding an item, weighted by the quantity
+	in each warehouse. An unweighted average would let a single sample piece in one warehouse
+	count as much as the bulk stock in another and skew the value of the suggested orders.
+	"""
+	item_rows = [sl for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0]
+	if not item_rows:
+		return 0
+
+	rows_with_stock = [sl for sl in item_rows if sl.bal_qty > 0]
+	total_qty = sum(sl.bal_qty for sl in rows_with_stock)
+	if not total_qty:
+		return sum(sl.val_rate for sl in item_rows) / len(item_rows)
+
+	return sum(sl.val_rate * sl.bal_qty for sl in rows_with_stock) / total_qty
 
 
 def _finalise_item_batch(
@@ -943,10 +1005,7 @@ def _finalise_item_batch(
 
 		price = item_prices.get(item_code)
 		if not price:
-			item_stock_levels = [
-				sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0
-			]
-			valuation_rate = sum(item_stock_levels) / len(item_stock_levels) if item_stock_levels else 0
+			valuation_rate = _get_fallback_valuation_rate(item_code, stock_levels)
 			price = valuation_rate or (item_details.get("fall_back_valuation_rate") if item_details else None)
 
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):
@@ -965,7 +1024,9 @@ def _finalise_item_batch(
 
 		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
 		if first_shortage_entry:
-			needed_date = getdate(first_shortage_entry.target_date)
+			needed_date = getdate(
+				_first_requirement_date(mrp_entry_docs, True) or first_shortage_entry.target_date
+			)
 			lead_time = first_shortage_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
 			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
@@ -978,7 +1039,9 @@ def _finalise_item_batch(
 			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
 		)
 		if first_shortage_excl_entry:
-			needed_date = getdate(first_shortage_excl_entry.target_date)
+			needed_date = getdate(
+				_first_requirement_date(mrp_entry_docs, False) or first_shortage_excl_entry.target_date
+			)
 			lead_time = first_shortage_excl_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days
@@ -1051,8 +1114,8 @@ def _finalise_item_batch(
 
 			# Calculate Scheduled Receipts Payable using actual PO dates.
 			# Each open PO line is processed individually so its own transaction_date (order),
-			# schedule_date (shipment/ETD), and custom_expected_arrival_date (arrival/ETA) can be used
-			# as the base date for the matching payment term type.
+			# shipment date and arrival date can be used as the base date for the matching
+			# payment term type. The shipment and arrival columns are chosen in MRP Settings.
 			item_po_lines = po_lines_by_item.get(item_code, [])
 
 			if supplier_name and payment_terms_template and item_po_lines:
@@ -1065,13 +1128,12 @@ def _finalise_item_batch(
 					order_date = (
 						getdate(po_line.get("transaction_date")) if po_line.get("transaction_date") else None
 					)
-					shipment_date = (
-						getdate(po_line.get("schedule_date")) if po_line.get("schedule_date") else None
-					)
+					# The configured shipment date field may be optional and left empty on a
+					# line, so fall back to the required-by date rather than losing the anchor.
+					shipment_date = po_line.get("shipment_date") or po_line.get("schedule_date")
+					shipment_date = getdate(shipment_date) if shipment_date else None
 					arrival_date = (
-						getdate(po_line.get("custom_expected_arrival_date"))
-						if po_line.get("custom_expected_arrival_date")
-						else shipment_date
+						getdate(po_line.get("arrival_date")) if po_line.get("arrival_date") else shipment_date
 					)
 					posting_date = arrival_date or shipment_date or order_date or date.today()
 

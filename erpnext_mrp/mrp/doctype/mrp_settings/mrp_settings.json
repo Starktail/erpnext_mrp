@@ -11,11 +11,14 @@
   "look_ahead",
   "requirement_based_on",
   "assume_remaining_qty",
+  "defer_suggestions_within_lead_time",
   "advanced_settings_section",
   "item_condition",
   "item_lead_time_field",
   "item_additional_lead_time_field",
   "po_item_delivery_date_field",
+  "po_item_shipment_date_field",
+  "po_item_arrival_date_field",
   "reorder_qty_item_field",
   "column_break_bdmb",
   "html_rsvb",
@@ -126,6 +129,18 @@
    "label": "Custom Purchase Order Item Delivery Date Field"
   },
   {
+   "description": "A field on 'Purchase Order Item' that anchors Payment Terms with a Due Date of \"Shipment date\". Any Date field. Defaults to the \"Required By\" field.",
+   "fieldname": "po_item_shipment_date_field",
+   "fieldtype": "Select",
+   "label": "Custom Purchase Order Item Shipment Date Field"
+  },
+  {
+   "description": "A field on 'Purchase Order Item' that anchors Payment Terms with a Due Date of \"Arrival date\". Any Date field. Defaults to the \"Expected Arrival Date\" field.",
+   "fieldname": "po_item_arrival_date_field",
+   "fieldtype": "Select",
+   "label": "Custom Purchase Order Item Arrival Date Field"
+  },
+  {
    "description": "An Item field to include in the Lead Time calculation",
    "fieldname": "item_additional_lead_time_field",
    "fieldtype": "Select",
@@ -161,6 +176,13 @@
    "fieldname": "assume_remaining_qty",
    "fieldtype": "Check",
    "label": "Assume Remaining Quantity for Partially Received POs"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, a shortage is only suggested from the first period an order placed today could actually arrive in, based on the item's lead time. The shortfall carries forward until then, so it is netted against the Purchase Orders already inbound instead of ordering stock the pipeline will deliver first.<br>When disabled, every shortage is suggested in the period it occurs, even when the lead time makes that delivery impossible.",
+   "fieldname": "defer_suggestions_within_lead_time",
+   "fieldtype": "Check",
+   "label": "Only Suggest Orders That Can Arrive In Time"
   },
   {
    "fieldname": "vars_display_settings_section",

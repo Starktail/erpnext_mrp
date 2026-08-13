@@ -800,6 +800,63 @@ class TestMRPRun(FrappeTestCase):
 		# We used a Payment Terms Template with 0 days, so payable amount should fall in the same period
 		self.assertEqual(mrp_entry.suggested_orders_value_payable, 20)
 
+	def test_fallback_valuation_rate_is_quantity_weighted(self, mock_date):
+		"""
+		Without an Item Price, the suggested orders value falls back to the stock valuation rate.
+		That fallback must be weighted by the quantity in each warehouse.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.lead_time_days = 0
+		item.additional_shipping_days = 0
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		# Bulk stock at the real price, plus one prototype sample at a wildly higher rate.
+		make_stock_entry(
+			item_code="SRZ11111",
+			posting_date=add_days(test_start_day, -1),
+			qty=151,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=20.92,
+			purpose="Material Receipt",
+		)
+		make_stock_entry(
+			item_code="SRZ11111",
+			posting_date=add_days(test_start_day, -1),
+			qty=1,
+			to_warehouse="_Test Warehouse 1 - _TC",
+			rate=671.03,
+			purpose="Material Receipt",
+		)
+
+		# Demand of 252 against 152 on hand leaves a shortage of 100.
+		so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(
+			item_code="SRZ11111", qty=252, delivery_date=so_date, transaction_date=test_start_day
+		)
+
+		# No Item Price exists (setUp clears them), so the valuation fallback is used.
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		mrp_entry = get_mrp_entry_by_item_week("SRZ11111", so_date)
+		self.assertEqual(mrp_entry.suggested_orders, 100)
+
+		# Quantity weighted: (151 * 20.92 + 1 * 671.03) / 152 = 25.1970...
+		expected_rate = (151 * 20.92 + 1 * 671.03) / 152
+		self.assertAlmostEqual(mrp_entry.suggested_orders_value, 100 * expected_rate, places=2)
+
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_14_days(self, mock_date):
 		"""
 		Test that MRP Entry record has correct Suggested Orders Value Payable for a Payment Term with > 0 days
@@ -2429,6 +2486,8 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 	def tearDown(self):
 		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
 		mrp_settings.po_item_delivery_date_field = ""
+		mrp_settings.po_item_shipment_date_field = ""
+		mrp_settings.po_item_arrival_date_field = ""
 		mrp_settings.assume_remaining_qty = 0
 		mrp_settings.save()
 		super().tearDown()
@@ -2436,11 +2495,18 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 	def _make_supplier(self, payment_terms_template: str) -> None:
 		frappe.db.set_value("Supplier", self.SUPPLIER_NAME, "payment_terms", payment_terms_template)
 
+	def _set_payment_anchor_fields(self, shipment: str = "", arrival: str = "") -> None:
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.po_item_shipment_date_field = shipment
+		mrp_settings.po_item_arrival_date_field = arrival
+		mrp_settings.save()
+
 	def _make_po(
 		self,
 		transaction_date: datetime.date,
 		schedule_date: datetime.date,
 		custom_expected_arrival_date: datetime.date | None,
+		expected_delivery_date: datetime.date | None = None,
 		qty: int = 10,
 		rate: float = 100.0,
 	):
@@ -2459,6 +2525,7 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 				"qty": qty,
 				"rate": rate,
 				"custom_expected_arrival_date": custom_expected_arrival_date,
+				"expected_delivery_date": expected_delivery_date,
 			},
 		)
 		po.insert(ignore_permissions=True)
@@ -2592,6 +2659,129 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 			"When ETA is absent, payable must fall back to the ETD week (W3)",
 		)
 		self.assertEqual(w1_entry.scheduled_receipts_value_payable or 0, 0)
+
+	def test_shipment_date_term_uses_configured_field_on_delayed_po(self, mock_date):
+		"""
+		A delayed order keeps its original schedule_date and tracks the new date on
+		expected_delivery_date. With that field configured as the shipment date anchor,
+		the instalment must follow the delay.
+
+		PO schedule_date = W1 (overdue), expected_delivery_date = W4, term = "Shipment date" + 0 days.
+		Expected: payable lands in W4, not W1.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w4 = test_start + datetime.timedelta(weeks=3)
+
+		self._set_payment_anchor_fields(shipment="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Shipment Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w1,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=w4,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w4_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w4)
+
+		self.assertGreater(
+			w4_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must follow the configured shipment date field (W4)",
+		)
+		self.assertEqual(
+			w1_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must not stay on the original schedule_date week (W1)",
+		)
+
+	def test_configured_shipment_field_empty_falls_back_to_schedule_date(self, mock_date):
+		"""
+		The configured shipment date field is optional and blank on most existing PO lines.
+		Those lines must keep using schedule_date instead of collapsing to the order date.
+
+		PO transaction_date = W1, schedule_date = W3, expected_delivery_date empty.
+		Expected: payable stays in W3.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+
+		self._set_payment_anchor_fields(shipment="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Shipment Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w3,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=None,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+
+		self.assertGreater(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"An empty shipment date field must fall back to schedule_date (W3)",
+		)
+		self.assertEqual(
+			w1_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"An empty shipment date field must not push the payable onto the order date (W1)",
+		)
+
+	def test_arrival_date_term_uses_configured_field(self, mock_date):
+		"""
+		The arrival date anchor is configurable too. With custom_expected_arrival_date empty,
+		the term must still resolve through the configured field rather than falling back
+		to the shipment date.
+
+		PO schedule_date = W3, expected_delivery_date = W5, term = "Arrival date" + 0 days.
+		Expected: payable lands in W5, not the shipment week W3.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+		w5 = test_start + datetime.timedelta(weeks=4)
+
+		self._set_payment_anchor_fields(arrival="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Arrival Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w3,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=w5,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+		w5_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w5)
+
+		self.assertGreater(
+			w5_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must follow the configured arrival date field (W5)",
+		)
+		self.assertEqual(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must not fall back to the shipment week (W3) when the arrival field is set",
+		)
 
 
 def _ensure_payment_terms_for_actual_dates():
@@ -2735,3 +2925,312 @@ class TestMRPFinaliseGuard(FrappeTestCase):
 			patch.object(mrp_run_module, "_get_batch_jobs", return_value=jobs),
 		):
 			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
+
+
+@patch("erpnext_mrp.mrp.tasks.mrp_run.date")
+class TestSuggestionsWithinLeadTime(FrappeTestCase):
+	"""
+	A suggested receipt is only useful if an order placed now could actually arrive in time.
+	When the lead time is longer than the distance to the shortage, the suggestion is placed in
+	a period it can never serve, and by the time it could arrive the inbound Purchase Orders have
+	already covered the gap -- leaving permanent surplus stock and inflated near-term cash.
+	"""
+
+	WAREHOUSE = "_Test Warehouse - _TC"
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("MRP Entry")
+		frappe.db.delete("MRP Forecast")
+		frappe.db.delete("Purchase Order")
+		frappe.db.delete("Stock Entry")
+		frappe.db.delete("Stock Ledger Entry")
+
+		if not frappe.db.exists("MRP Settings", "MRP Settings"):
+			mrp_settings = frappe.new_doc("MRP Settings")
+		else:
+			mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.look_ahead = 12
+		mrp_settings.periods_type = "Calendar Week"
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.item_lead_time_field = "lead_time_days | Lead Time in days"
+		mrp_settings.item_additional_lead_time_field = ""
+		mrp_settings.defer_suggestions_within_lead_time = 1
+		mrp_settings.save()
+		self.mrp_settings = mrp_settings
+
+	def tearDown(self):
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = ""
+		mrp_settings.defer_suggestions_within_lead_time = 0
+		mrp_settings.save()
+		super().tearDown()
+
+	def _setup_item(self, item_code: str, lead_time_days: int, on_hand: int, test_start):
+		item = create_item(item_code, item_code, "_Test Item Group A", lead_time_days=lead_time_days)
+		item.lead_time_days = lead_time_days
+		item.save()
+
+		self.mrp_settings.item_condition = f"doc.item_code == '{item_code}'"
+		self.mrp_settings.save()
+
+		if on_hand:
+			make_stock_entry(
+				item_code=item_code,
+				posting_date=add_days(test_start, -1),
+				qty=on_hand,
+				to_warehouse=self.WAREHOUSE,
+				rate=10,
+				purpose="Material Receipt",
+			)
+		return item
+
+	def _entries(self, item_code: str) -> list:
+		return frappe.get_all(
+			"MRP Entry",
+			filters={"item_code": item_code},
+			fields=[
+				"name",
+				"target_date",
+				"suggested_receipts",
+				"suggested_orders",
+				"suggested_orders_value",
+				"scheduled_receipts",
+				"projected_on_hand_inventory",
+				"projected_on_hand_inventory_no_action",
+			],
+			order_by="target_date asc",
+		)
+
+	def test_no_suggestion_when_inbound_po_arrives_before_lead_time_allows(self, mock_date):
+		"""
+		Lead time 56 days (8 weeks). Shortage in W2, open PO for 200 landing in W4.
+		Nothing ordered today can arrive before W8, and by W8 the PO has already covered
+		the gap, so no order should be suggested and no surplus should be left behind.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-COVERED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		create_purchase_order(item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entries = self._entries(item_code)
+		total_suggested_orders = sum(e.suggested_orders or 0 for e in entries)
+		total_suggested_value = sum(e.suggested_orders_value or 0 for e in entries)
+
+		self.assertEqual(
+			total_suggested_orders,
+			0,
+			"No order can arrive before the inbound PO, so none should be suggested",
+		)
+		self.assertEqual(
+			total_suggested_value,
+			0,
+			"Unachievable suggestions must not inflate near-term suggested order cash",
+		)
+		self.assertEqual(
+			entries[-1].projected_on_hand_inventory,
+			entries[-1].projected_on_hand_inventory_no_action,
+			"Suggesting an order the pipeline already covers leaves permanent surplus stock",
+		)
+
+	def test_suggestion_is_netted_against_a_partially_covering_po(self, mock_date):
+		"""
+		Lead time 56 days. Shortage of 200 in W2, but only 50 is inbound in W4.
+		A suggestion is still required, but it must be netted against the inbound 50 rather
+		than repeating the full W2 shortage.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-PARTIAL"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 300})
+		create_purchase_order(item_code=item_code, qty=50, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entries = self._entries(item_code)
+		total_suggested_orders = sum(e.suggested_orders or 0 for e in entries)
+
+		self.assertGreater(
+			total_suggested_orders,
+			0,
+			"The inbound PO only covers part of the shortage, so a suggestion is still required",
+		)
+		self.assertEqual(
+			total_suggested_orders,
+			150,
+			"The suggestion must net off the 50 already inbound, not repeat the full 200 shortage",
+		)
+
+	def test_short_lead_time_shortage_is_still_suggested(self, mock_date):
+		"""
+		Guard against over-suppression: with a 7 day lead time, a W2 shortage can be fixed by
+		ordering in W1, so the suggestion must survive even though a PO exists later in W6.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-SHORT"
+
+		w1 = test_start + datetime.timedelta(weeks=1)
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w6 = test_start + datetime.timedelta(weeks=6)
+
+		self._setup_item(item_code, lead_time_days=7, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		create_purchase_order(item_code=item_code, qty=200, delivery_date=w6, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(item_code, w1)
+		w2_entry = get_mrp_entry_by_item_week(item_code, w2)
+
+		self.assertEqual(
+			w2_entry.suggested_receipts, 50, "An achievable shortage must still be flagged in W2"
+		)
+		self.assertEqual(
+			w1_entry.suggested_orders,
+			50,
+			"The order must be suggested one week ahead of the W2 receipt",
+		)
+
+	def test_long_lead_time_shortage_without_any_po_is_still_suggested(self, mock_date):
+		"""
+		Guard against suppressing real demand: the same long lead time with nothing inbound
+		must still raise a suggestion, because no pipeline supply exists to cover the gap.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-UNCOVERED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entries = self._entries(item_code)
+		total_suggested_orders = sum(e.suggested_orders or 0 for e in entries)
+
+		self.assertEqual(
+			total_suggested_orders,
+			50,
+			"With nothing inbound the shortage is real and must still be ordered",
+		)
+
+	def test_setting_disabled_leaves_behaviour_unchanged(self, mock_date):
+		"""
+		With the setting off, the shortage is suggested in the period it occurs even though
+		the lead time makes that delivery impossible -- the behaviour before the setting existed.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-DISABLED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self.mrp_settings.defer_suggestions_within_lead_time = 0
+		self.mrp_settings.save()
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		create_purchase_order(item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w2_entry = get_mrp_entry_by_item_week(item_code, w2)
+		entries = self._entries(item_code)
+
+		self.assertEqual(
+			w2_entry.suggested_receipts, 50, "With the setting off the W2 shortage is still suggested"
+		)
+		self.assertEqual(
+			sum(e.suggested_orders or 0 for e in entries),
+			50,
+			"With the setting off the unachievable order is still raised",
+		)
+
+	def test_lead_time_beyond_horizon_still_surfaces_netted_requirement(self, mock_date):
+		"""
+		A lead time longer than the look-ahead horizon has no fillable period inside it. The
+		requirement must be clamped to the last period rather than disappearing, and it must
+		still be netted against the inbound Purchase Order.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-BEYOND"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		# 154 days is 22 weeks, well past the 12 week look-ahead configured in setUp.
+		self._setup_item(item_code, lead_time_days=154, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 300})
+		create_purchase_order(item_code=item_code, qty=50, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		entries = self._entries(item_code)
+
+		self.assertEqual(
+			sum(e.suggested_orders or 0 for e in entries),
+			150,
+			"A lead time past the horizon must still raise the netted requirement, not nothing",
+		)
+		self.assertEqual(
+			entries[-1].suggested_receipts,
+			150,
+			"The requirement belongs in the last period of the horizon",
+		)
+
+		# The receipt is booked in the last period, but the demand exists in W2, so urgency must
+		# be measured from W2: 14 days out, less the 154 day lead time.
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(
+			header.days_to_reorder,
+			-140,
+			"Urgency must be measured from the demand, not from the deferred receipt period",
+		)
+
+	def test_deferral_does_not_change_urgency_for_a_fillable_shortage(self, mock_date):
+		"""
+		When the shortage is far enough out for the lead time to be met, the receipt is not
+		deferred and the reported urgency must match the un-deferred calculation exactly.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-URGENCY"
+
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=7, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w4, "forecast_quantity": 150})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(
+			header.days_to_reorder,
+			21,
+			"An achievable shortage 28 days out with a 7 day lead time must report 21 days",
+		)
