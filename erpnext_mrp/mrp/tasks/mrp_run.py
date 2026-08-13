@@ -951,6 +951,24 @@ def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frap
 	return grouped
 
 
+def _first_requirement_date(mrp_entry_docs: list, include_reorder_level: bool):
+	"""
+	The date the material is first needed, which is not necessarily the period the suggested
+	receipt is booked in: deferring a suggestion to the first period the lead time allows moves
+	the receipt, not the date the demand exists. Reorder urgency has to be measured against the
+	demand, otherwise a deferred requirement looks less overdue than it is.
+
+	Up to the first shortage the projection without suggested orders is identical to the one
+	with them, so its first dip below the safety stock floor is that shortage. Returns None when
+	no dip is found, leaving the caller to fall back to the receipt's own period.
+	"""
+	for entry in mrp_entry_docs:
+		floor = (entry.reorder_level or 0) if include_reorder_level else 0
+		if (entry.projected_on_hand_inventory_no_action or 0) < floor:
+			return entry.target_date
+	return None
+
+
 def _get_fallback_valuation_rate(item_code: str, stock_levels: list) -> float:
 	"""
 	Average valuation rate across the warehouses holding an item, weighted by the quantity
@@ -1006,7 +1024,9 @@ def _finalise_item_batch(
 
 		first_shortage_entry = next((e for e in mrp_entry_docs if e.suggested_receipts > 0), None)
 		if first_shortage_entry:
-			needed_date = getdate(first_shortage_entry.target_date)
+			needed_date = getdate(
+				_first_requirement_date(mrp_entry_docs, True) or first_shortage_entry.target_date
+			)
 			lead_time = first_shortage_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
 			mrp_entry_docs[0].days_to_reorder = (getdate(order_date) - today).days
@@ -1019,7 +1039,9 @@ def _finalise_item_batch(
 			(e for e in mrp_entry_docs if e.suggested_receipts_excl_reorder_level > 0), None
 		)
 		if first_shortage_excl_entry:
-			needed_date = getdate(first_shortage_excl_entry.target_date)
+			needed_date = getdate(
+				_first_requirement_date(mrp_entry_docs, False) or first_shortage_excl_entry.target_date
+			)
 			lead_time = first_shortage_excl_entry.lead_time or 0
 			order_date = add_days(needed_date, -lead_time)
 			mrp_entry_docs[0].days_to_reorder_excl_reorder_level = (getdate(order_date) - today).days

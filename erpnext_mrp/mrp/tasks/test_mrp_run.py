@@ -3201,3 +3201,36 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 			150,
 			"The requirement belongs in the last period of the horizon",
 		)
+
+		# The receipt is booked in the last period, but the demand exists in W2, so urgency must
+		# be measured from W2: 14 days out, less the 154 day lead time.
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(
+			header.days_to_reorder,
+			-140,
+			"Urgency must be measured from the demand, not from the deferred receipt period",
+		)
+
+	def test_deferral_does_not_change_urgency_for_a_fillable_shortage(self, mock_date):
+		"""
+		When the shortage is far enough out for the lead time to be met, the receipt is not
+		deferred and the reported urgency must match the un-deferred calculation exactly.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-FENCE-URGENCY"
+
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=7, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w4, "forecast_quantity": 150})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(
+			header.days_to_reorder,
+			21,
+			"An achievable shortage 28 days out with a 7 day lead time must report 21 days",
+		)
