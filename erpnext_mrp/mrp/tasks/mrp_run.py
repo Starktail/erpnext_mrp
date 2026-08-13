@@ -925,6 +925,24 @@ def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frap
 	return grouped
 
 
+def _get_fallback_valuation_rate(item_code: str, stock_levels: list) -> float:
+	"""
+	Average valuation rate across the warehouses holding an item, weighted by the quantity
+	in each warehouse. An unweighted average would let a single sample piece in one warehouse
+	count as much as the bulk stock in another and skew the value of the suggested orders.
+	"""
+	item_rows = [sl for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0]
+	if not item_rows:
+		return 0
+
+	rows_with_stock = [sl for sl in item_rows if sl.bal_qty > 0]
+	total_qty = sum(sl.bal_qty for sl in rows_with_stock)
+	if not total_qty:
+		return sum(sl.val_rate for sl in item_rows) / len(item_rows)
+
+	return sum(sl.val_rate * sl.bal_qty for sl in rows_with_stock) / total_qty
+
+
 def _finalise_item_batch(
 	item_codes: list[str],
 	item_details_map: dict[str, frappe._dict],
@@ -943,10 +961,7 @@ def _finalise_item_batch(
 
 		price = item_prices.get(item_code)
 		if not price:
-			item_stock_levels = [
-				sl.val_rate for sl in stock_levels if sl.item_code == item_code and sl.val_rate > 0
-			]
-			valuation_rate = sum(item_stock_levels) / len(item_stock_levels) if item_stock_levels else 0
+			valuation_rate = _get_fallback_valuation_rate(item_code, stock_levels)
 			price = valuation_rate or (item_details.get("fall_back_valuation_rate") if item_details else None)
 
 		for index, entry in reversed(list(enumerate(mrp_entry_docs))):

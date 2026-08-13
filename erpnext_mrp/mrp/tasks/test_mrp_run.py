@@ -800,6 +800,63 @@ class TestMRPRun(FrappeTestCase):
 		# We used a Payment Terms Template with 0 days, so payable amount should fall in the same period
 		self.assertEqual(mrp_entry.suggested_orders_value_payable, 20)
 
+	def test_fallback_valuation_rate_is_quantity_weighted(self, mock_date):
+		"""
+		Without an Item Price, the suggested orders value falls back to the stock valuation rate.
+		That fallback must be weighted by the quantity in each warehouse.
+		"""
+		test_start_day = datetime.date(2025, 11, 4)
+		mock_date.today.return_value = test_start_day
+
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = "doc.item_code == 'SRZ11111'"
+		mrp_settings.save()
+
+		item = frappe.get_doc("Item", "SRZ11111")
+		item.lead_time_days = 0
+		item.additional_shipping_days = 0
+		item.item_defaults = []
+		item.uoms = []
+		row = item.append("item_defaults")
+		row.company = "_Test Company"
+		row.default_warehouse = "_Test Warehouse - _TC"
+		item.save()
+
+		# Bulk stock at the real price, plus one prototype sample at a wildly higher rate.
+		make_stock_entry(
+			item_code="SRZ11111",
+			posting_date=add_days(test_start_day, -1),
+			qty=151,
+			to_warehouse="_Test Warehouse - _TC",
+			rate=20.92,
+			purpose="Material Receipt",
+		)
+		make_stock_entry(
+			item_code="SRZ11111",
+			posting_date=add_days(test_start_day, -1),
+			qty=1,
+			to_warehouse="_Test Warehouse 1 - _TC",
+			rate=671.03,
+			purpose="Material Receipt",
+		)
+
+		# Demand of 252 against 152 on hand leaves a shortage of 100.
+		so_date = add_to_date(test_start_day, days=21)
+		create_sales_order(
+			item_code="SRZ11111", qty=252, delivery_date=so_date, transaction_date=test_start_day
+		)
+
+		# No Item Price exists (setUp clears them), so the valuation fallback is used.
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		mrp_entry = get_mrp_entry_by_item_week("SRZ11111", so_date)
+		self.assertEqual(mrp_entry.suggested_orders, 100)
+
+		# Quantity weighted: (151 * 20.92 + 1 * 671.03) / 152 = 25.1970...
+		expected_rate = (151 * 20.92 + 1 * 671.03) / 152
+		self.assertAlmostEqual(mrp_entry.suggested_orders_value, 100 * expected_rate, places=2)
+
 	def test_process_mrp_item_entry_has_correct_suggested_orders_value_payable_14_days(self, mock_date):
 		"""
 		Test that MRP Entry record has correct Suggested Orders Value Payable for a Payment Term with > 0 days
