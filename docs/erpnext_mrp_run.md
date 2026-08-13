@@ -14,6 +14,7 @@ The `MRP Settings` doctype allows you to configure various parameters for the MR
 -   **Custom Purchase Order Item Shipment Date Field**: Selects the `Purchase Order Item` Date DocField that anchors payment terms with a Due Date of **Shipment date**. Unlike the delivery date field above, optional Date fields can be selected here, because the date a delay is tracked on is often not a mandatory field. By default, `schedule_date` is used. If the selected field is empty on a PO line, that line falls back to `schedule_date`.
 -   **Custom Purchase Order Item Arrival Date Field**: Selects the `Purchase Order Item` Date DocField that anchors payment terms with a Due Date of **Arrival date**. By default, `custom_expected_arrival_date` is used. If the selected field is empty on a PO line, that line falls back to the shipment date.
 -   **Custom Re-order Qty Item Field**: Here you can select another `Item` DocField to be used as the Re-order Quantity. Defaults to the 'Minimum Order Qty' field.
+-   **Only Suggest Orders That Can Arrive In Time**: When enabled, a shortage is only suggested from the first period an order placed today could actually be received in, based on the item's lead time. Earlier shortfalls carry forward and are netted against the Purchase Orders already inbound, so MRP stops proposing stock the pipeline will deliver first. Disabled by default, which suggests every shortage in the period it occurs regardless of lead time.
 -   **Assume Remaining Quantity**: When calculating scheduled receipts from open Purchase Orders, this setting determines whether to include partially received order items. If enabled, the remaining unreceived quantity is considered as expected supply. If disabled, partially received items are ignored.
 
 #### Variables/Measures Display Settings
@@ -86,6 +87,8 @@ For each item at this level, the system calculates how much needs to be produced
 3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
 5. **Projected Inventory**: `on_hand_inventory − demand + scheduled_receipts + suggested_receipts`
+
+If **Only Suggest Orders That Can Arrive In Time** is enabled, step 4 is skipped for any period earlier than the item's lead time allows - an order placed today cannot be received before then. The shortfall is not discarded: it flows into `Projected On Hand Inventory` and carries forward as the next period's opening stock, so the first period that *can* be filled sees the accumulated deficit netted against every open Purchase Order arriving in between. If the pipeline has already covered the gap by that point, nothing is suggested at all. Items whose lead time extends past the end of the look-ahead horizon have their requirement placed in the final period, so it still surfaces rather than disappearing.
 
 **Step 3 — Net demand explosion (all levels except the last)**
 

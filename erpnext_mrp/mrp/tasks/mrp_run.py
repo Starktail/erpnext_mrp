@@ -799,10 +799,21 @@ def _calculate_suggested_receipts_batch(
 	requirement_based_on: str,
 ) -> None:
 	grouped_mrp_entries = _fetch_grouped_mrp_entries(item_codes)
+	defer_within_lead_time = bool(frappe.get_cached_doc("MRP Settings").defer_suggestions_within_lead_time)
 
 	for item_code, item_mrp_entries_dicts in grouped_mrp_entries.items():
 		mrp_entry_docs = [frappe.get_doc("MRP Entry", d.name) for d in item_mrp_entries_dicts]
 		item_details = item_details_map.get(item_code)
+
+		# Nothing ordered today can arrive before the lead time has elapsed, so a shortage in an
+		# earlier period is deferred to the first period that could actually be filled. The
+		# shortfall is not lost: it carries forward through projected on hand, so the deferred
+		# period nets it against whatever the open Purchase Orders deliver in the meantime.
+		first_fillable_index = 0
+		if defer_within_lead_time:
+			first_fillable_index = min(
+				math.ceil((mrp_entry_docs[0].lead_time or 0) / 7), len(mrp_entry_docs) - 1
+			)
 
 		mrp_entry_docs[0].on_hand_inventory = sum(
 			sl.bal_qty for sl in stock_levels if sl.item_code == item_code
@@ -848,7 +859,7 @@ def _calculate_suggested_receipts_batch(
 				+ (entry.scheduled_receipts or 0)
 				- (entry.reorder_level or 0)
 			)
-			if shortage < 0:
+			if shortage < 0 and index >= first_fillable_index:
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts = math.ceil(-shortage / moq) * moq
 
@@ -863,7 +874,7 @@ def _calculate_suggested_receipts_batch(
 			shortage_excl = (
 				(entry.on_hand_inventory_excl_reorder_level or 0) - demand + (entry.scheduled_receipts or 0)
 			)
-			if shortage_excl < 0:
+			if shortage_excl < 0 and index >= first_fillable_index:
 				moq = entry.reorder_quantity or 1
 				entry.suggested_receipts_excl_reorder_level = math.ceil(-shortage_excl / moq) * moq
 
