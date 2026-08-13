@@ -883,6 +883,17 @@ def _calculate_suggested_receipts_batch(
 			entry.save()
 
 
+def _resolve_po_item_date_column(setting_value: str | None, default: str | None = None) -> str | None:
+	"""
+	Resolve an MRP Settings field selection ("fieldname | Label") to a column on
+	'Purchase Order Item'
+	"""
+	for fieldname in ((setting_value or "").split("|")[0].strip(), default):
+		if fieldname and frappe.db.has_column("Purchase Order Item", fieldname):
+			return fieldname
+	return None
+
+
 def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frappe._dict]]:
 	if not item_codes:
 		return {}
@@ -894,18 +905,22 @@ def _fetch_open_po_lines_for_items(item_codes: list[str]) -> dict[str, list[frap
 
 	placeholders = ", ".join([frappe.db.escape(c) for c in item_codes])
 
-	arrival_date_col = (
-		"po_item.custom_expected_arrival_date"
-		if frappe.db.has_column("Purchase Order Item", "custom_expected_arrival_date")
-		else "NULL"
+	# The dates anchoring the payment terms are configurable, because the date a supplier
+	# originally committed to is not always the date the delay is tracked on.
+	shipment_date_field = _resolve_po_item_date_column(settings.po_item_shipment_date_field, "schedule_date")
+	arrival_date_field = _resolve_po_item_date_column(
+		settings.po_item_arrival_date_field, "custom_expected_arrival_date"
 	)
+	shipment_date_col = f"po_item.`{shipment_date_field}`" if shipment_date_field else "NULL"
+	arrival_date_col = f"po_item.`{arrival_date_field}`" if arrival_date_field else "NULL"
 
 	sql_query = f"""# nosemgrep: frappe-sql-format-injection
         SELECT
             po_item.item_code,
             po.transaction_date,
             po_item.schedule_date,
-            {arrival_date_col} AS custom_expected_arrival_date,
+            {shipment_date_col} AS shipment_date,
+            {arrival_date_col} AS arrival_date,
             (po_item.qty - po_item.received_qty) * po_item.base_rate AS remaining_value
         FROM `tabPurchase Order Item` AS po_item
         JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
@@ -1066,8 +1081,8 @@ def _finalise_item_batch(
 
 			# Calculate Scheduled Receipts Payable using actual PO dates.
 			# Each open PO line is processed individually so its own transaction_date (order),
-			# schedule_date (shipment/ETD), and custom_expected_arrival_date (arrival/ETA) can be used
-			# as the base date for the matching payment term type.
+			# shipment date and arrival date can be used as the base date for the matching
+			# payment term type. The shipment and arrival columns are chosen in MRP Settings.
 			item_po_lines = po_lines_by_item.get(item_code, [])
 
 			if supplier_name and payment_terms_template and item_po_lines:
@@ -1080,13 +1095,12 @@ def _finalise_item_batch(
 					order_date = (
 						getdate(po_line.get("transaction_date")) if po_line.get("transaction_date") else None
 					)
-					shipment_date = (
-						getdate(po_line.get("schedule_date")) if po_line.get("schedule_date") else None
-					)
+					# The configured shipment date field may be optional and left empty on a
+					# line, so fall back to the required-by date rather than losing the anchor.
+					shipment_date = po_line.get("shipment_date") or po_line.get("schedule_date")
+					shipment_date = getdate(shipment_date) if shipment_date else None
 					arrival_date = (
-						getdate(po_line.get("custom_expected_arrival_date"))
-						if po_line.get("custom_expected_arrival_date")
-						else shipment_date
+						getdate(po_line.get("arrival_date")) if po_line.get("arrival_date") else shipment_date
 					)
 					posting_date = arrival_date or shipment_date or order_date or date.today()
 

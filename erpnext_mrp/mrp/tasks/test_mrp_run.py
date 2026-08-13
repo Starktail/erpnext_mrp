@@ -2486,6 +2486,8 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 	def tearDown(self):
 		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
 		mrp_settings.po_item_delivery_date_field = ""
+		mrp_settings.po_item_shipment_date_field = ""
+		mrp_settings.po_item_arrival_date_field = ""
 		mrp_settings.assume_remaining_qty = 0
 		mrp_settings.save()
 		super().tearDown()
@@ -2493,11 +2495,18 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 	def _make_supplier(self, payment_terms_template: str) -> None:
 		frappe.db.set_value("Supplier", self.SUPPLIER_NAME, "payment_terms", payment_terms_template)
 
+	def _set_payment_anchor_fields(self, shipment: str = "", arrival: str = "") -> None:
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.po_item_shipment_date_field = shipment
+		mrp_settings.po_item_arrival_date_field = arrival
+		mrp_settings.save()
+
 	def _make_po(
 		self,
 		transaction_date: datetime.date,
 		schedule_date: datetime.date,
 		custom_expected_arrival_date: datetime.date | None,
+		expected_delivery_date: datetime.date | None = None,
 		qty: int = 10,
 		rate: float = 100.0,
 	):
@@ -2516,6 +2525,7 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 				"qty": qty,
 				"rate": rate,
 				"custom_expected_arrival_date": custom_expected_arrival_date,
+				"expected_delivery_date": expected_delivery_date,
 			},
 		)
 		po.insert(ignore_permissions=True)
@@ -2649,6 +2659,129 @@ class TestScheduledReceiptsPayableWithActualPODates(FrappeTestCase):
 			"When ETA is absent, payable must fall back to the ETD week (W3)",
 		)
 		self.assertEqual(w1_entry.scheduled_receipts_value_payable or 0, 0)
+
+	def test_shipment_date_term_uses_configured_field_on_delayed_po(self, mock_date):
+		"""
+		A delayed order keeps its original schedule_date and tracks the new date on
+		expected_delivery_date. With that field configured as the shipment date anchor,
+		the instalment must follow the delay.
+
+		PO schedule_date = W1 (overdue), expected_delivery_date = W4, term = "Shipment date" + 0 days.
+		Expected: payable lands in W4, not W1.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w4 = test_start + datetime.timedelta(weeks=3)
+
+		self._set_payment_anchor_fields(shipment="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Shipment Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w1,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=w4,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w4_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w4)
+
+		self.assertGreater(
+			w4_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must follow the configured shipment date field (W4)",
+		)
+		self.assertEqual(
+			w1_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must not stay on the original schedule_date week (W1)",
+		)
+
+	def test_configured_shipment_field_empty_falls_back_to_schedule_date(self, mock_date):
+		"""
+		The configured shipment date field is optional and blank on most existing PO lines.
+		Those lines must keep using schedule_date instead of collapsing to the order date.
+
+		PO transaction_date = W1, schedule_date = W3, expected_delivery_date empty.
+		Expected: payable stays in W3.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+
+		self._set_payment_anchor_fields(shipment="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Shipment Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w3,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=None,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w1_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w1)
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+
+		self.assertGreater(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"An empty shipment date field must fall back to schedule_date (W3)",
+		)
+		self.assertEqual(
+			w1_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"An empty shipment date field must not push the payable onto the order date (W1)",
+		)
+
+	def test_arrival_date_term_uses_configured_field(self, mock_date):
+		"""
+		The arrival date anchor is configurable too. With custom_expected_arrival_date empty,
+		the term must still resolve through the configured field rather than falling back
+		to the shipment date.
+
+		PO schedule_date = W3, expected_delivery_date = W5, term = "Arrival date" + 0 days.
+		Expected: payable lands in W5, not the shipment week W3.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+
+		w1 = test_start
+		w3 = test_start + datetime.timedelta(weeks=2)
+		w5 = test_start + datetime.timedelta(weeks=4)
+
+		self._set_payment_anchor_fields(arrival="expected_delivery_date | Expected Delivery Date")
+		self._make_supplier("_Test Payment Term based on Arrival Date")
+		self._make_po(
+			transaction_date=w1,
+			schedule_date=w3,
+			custom_expected_arrival_date=None,
+			expected_delivery_date=w5,
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		w3_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w3)
+		w5_entry = get_mrp_entry_by_item_week(self.ITEM_CODE, w5)
+
+		self.assertGreater(
+			w5_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must follow the configured arrival date field (W5)",
+		)
+		self.assertEqual(
+			w3_entry.scheduled_receipts_value_payable or 0,
+			0,
+			"Payable must not fall back to the shipment week (W3) when the arrival field is set",
+		)
 
 
 def _ensure_payment_terms_for_actual_dates():

@@ -97,6 +97,40 @@ frappe.ui.form.on("MRP Settings", {
       },
     });
 
+    // Set the Options for the payment term anchor date fields.
+    frappe.call({
+      method: "get_docfields",
+      doc: frm.doc,
+      args: {
+        doctype: "Purchase Order Item",
+        field_type: "Date",
+      },
+      callback: function (r) {
+        // Sort the array of objects alphabetically by the label property
+        r.message.sort((a, b) => {
+          const labelA = a.label || "";
+          const labelB = b.label || "";
+          return labelA.localeCompare(labelB);
+        });
+
+        // Use map to create an array of strings in the desired format
+        const formattedStrings = r.message.map(
+          (fields) => `${fields.fieldname} | ${fields.label}`,
+        );
+
+        // Join the strings with newline characters to create the final string
+        const options = "\n" + formattedStrings.join("\n");
+
+        // Set the Options property
+        ["po_item_shipment_date_field", "po_item_arrival_date_field"].forEach(
+          (fieldname) => {
+            frm.set_df_property(fieldname, "options", options);
+            frm.refresh_field(fieldname);
+          },
+        );
+      },
+    });
+
     // Set the Options for the reorder_qty_item_field field
     frappe.call({
       method: "get_docfields",
