@@ -25,7 +25,7 @@ from frappe.utils import add_days, flt, get_datetime, getdate, now_datetime
 from frappe.utils.data import convert_utc_to_system_timezone
 from pypika import Order
 
-from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context
+from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_context, get_excluded_warehouses
 
 
 @frappe.whitelist()
@@ -1635,15 +1635,11 @@ def _finalise_suggestions(
 		_publish_mrp_run_complete()
 
 
-def _get_rejected_warehouses() -> set[str]:
-	return set(frappe.db.sql_list("SELECT name FROM `tabWarehouse` WHERE is_rejected_warehouse = 1"))
-
-
 def _process_levels_sequentially(enqueue: bool) -> None:
 	filters = frappe._dict({"from_date": date.today(), "to_date": date.today()})
 	stock_level_report = execute_stock_balance_report(filters=filters)
-	rejected_warehouses = _get_rejected_warehouses()
-	stock_levels = [sl for sl in stock_level_report[1] if sl.get("warehouse") not in rejected_warehouses]
+	excluded_warehouses = get_excluded_warehouses()
+	stock_levels = [sl for sl in stock_level_report[1] if sl.get("warehouse") not in excluded_warehouses]
 
 	settings = frappe.get_cached_doc("MRP Settings")
 	requirement_based_on = settings.requirement_based_on

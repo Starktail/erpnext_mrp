@@ -9,6 +9,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date, now_datetime
 
+from erpnext_mrp.api import get_current_stock_levels
 from erpnext_mrp.mrp.tasks import mrp_run as mrp_run_module
 from erpnext_mrp.mrp.tasks.mrp_run import (
 	_NO_REORDER_SENTINEL,
@@ -3470,3 +3471,109 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 		self.mrp_settings.save()
 
 		self.assertEqual(get_expedite_status(), {"enabled": False, "count": 0, "needs_rerun": False})
+
+
+@patch("erpnext_mrp.mrp.tasks.mrp_run.date")
+class TestExcludedWarehouses(FrappeTestCase):
+	"""
+	Stock in warehouses excluded in MRP Settings (and in any warehouse below an excluded group)
+	must not count as on hand inventory, just like stock in rejected warehouses.
+	"""
+
+	TEST_START = datetime.date(2025, 11, 3)
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("MRP Entry")
+		frappe.db.delete("MRP Forecast")
+		frappe.db.delete("Stock Entry")
+		frappe.db.delete("Stock Ledger Entry")
+		frappe.db.delete("Bin")
+
+		if not frappe.db.exists("MRP Settings", "MRP Settings"):
+			mrp_settings = frappe.new_doc("MRP Settings")
+		else:
+			mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.look_ahead = 4
+		mrp_settings.periods_type = "Calendar Week"
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.item_lead_time_field = "lead_time_days | Lead Time in days"
+		mrp_settings.item_additional_lead_time_field = ""
+		mrp_settings.set("excluded_warehouses", [])
+		mrp_settings.save()
+		self.mrp_settings = mrp_settings
+
+	def tearDown(self):
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = ""
+		mrp_settings.set("excluded_warehouses", [])
+		mrp_settings.save()
+		super().tearDown()
+
+	def _setup_item(self, item_code: str, stock: dict[str, int]):
+		create_item(item_code, item_code, "_Test Item Group A", lead_time_days=7)
+		self.mrp_settings.item_condition = f"doc.item_code == '{item_code}'"
+		self.mrp_settings.save()
+
+		for warehouse, qty in stock.items():
+			make_stock_entry(
+				item_code=item_code,
+				posting_date=add_days(self.TEST_START, -1),
+				qty=qty,
+				to_warehouse=warehouse,
+				rate=10,
+				purpose="Material Receipt",
+			)
+
+	def _exclude(self, *warehouses: str):
+		self.mrp_settings.set("excluded_warehouses", [{"warehouse": w} for w in warehouses])
+		self.mrp_settings.save()
+
+	def _on_hand(self, item_code: str) -> float:
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		return get_mrp_entry_by_item_week(item_code, self.TEST_START).on_hand_inventory
+
+	def test_stock_in_excluded_warehouse_is_not_on_hand(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-DIRECT"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse 1 - _TC": 50})
+
+		self.assertEqual(self._on_hand(item_code), 150, "Without exclusions all stock counts")
+
+		self._exclude("_Test Warehouse 1 - _TC")
+		self.assertEqual(self._on_hand(item_code), 100, "The excluded warehouse's 50 must not count")
+
+	def test_excluding_a_group_excludes_its_child_warehouses(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-GROUP"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse Group-C1 - _TC": 30})
+
+		self._exclude("_Test Warehouse Group - _TC")
+		self.assertEqual(self._on_hand(item_code), 100, "Stock below an excluded group must not count")
+
+	def test_current_stock_levels_skip_excluded_warehouses(self, mock_date):
+		"""The workbench's out-of-sync check must compare like with like."""
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-CURRENT"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse 1 - _TC": 50})
+		self._exclude("_Test Warehouse 1 - _TC")
+
+		self.assertEqual(get_current_stock_levels([item_code]), {item_code: 100})
+
+	def test_changing_excluded_warehouses_needs_rerun(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		self._exclude("_Test Warehouse 1 - _TC")
+		changed_on = frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on")
+
+		# Saving the same exclusions again is not a change
+		self.mrp_settings.reload()
+		self.mrp_settings.save()
+		self.assertEqual(
+			frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on"), changed_on
+		)
+
+		self._exclude("_Test Warehouse 1 - _TC", "_Test Warehouse 2 - _TC")
+		self.assertGreater(
+			frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on"), changed_on
+		)

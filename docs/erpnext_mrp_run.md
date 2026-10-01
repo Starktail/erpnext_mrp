@@ -8,6 +8,7 @@ The core of the MRP Tools is a background process that calculates the material p
 
 The `MRP Settings` doctype allows you to configure various parameters for the MRP calculation:
 
+-   **Exclude Warehouses from Inventory**: Warehouses whose stock should not count as on hand inventory, for example quarantine, display or customer-owned stock. Selecting a group warehouse excludes every warehouse below it. Warehouses marked as **Rejected Warehouses** are always excluded, whether listed here or not.
 -   **Custom Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
 -   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
 -   **Custom Purchase Order Item Delivery Date Field**: This setting allows you to select a mandatory Date DocField from the `Purchase Order Item` doctype. This field will be used as the delivery date for calculating `Ordered Qty` in the MRP run. By default, `schedule_date` is used.
@@ -82,7 +83,7 @@ The raw signals are summed into planning totals for all items at the current lev
 
 For each item at this level, the system calculates how much needs to be produced or purchased, period by period, in chronological order:
 
-1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
+1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`) and any warehouses listed in **Exclude Warehouses from Inventory** (including the warehouses below an excluded group). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
 2. **Net Requirements**: Total demand is determined by the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
 3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
@@ -145,7 +146,7 @@ The following are the key fields calculated for each item in each period:
 | `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                     |
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
 | **Inventory & Demand**          |                                                                                                                                                                       |
-| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) is excluded.                        |
+| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) and in warehouses excluded in MRP Settings is excluded.                        |
 | `open_orders`                   | Total firm demand for the period: Reserved Qty (Sales Orders) + Reserved Qty for Production (Work Orders) + Upstream Net Demand. |
 | `upstream_net_demand`           | Net demand exploded from parent items at the level above. Written when a parent's `suggested_receipts > 0` and this item appears in the parent's BOM. Accumulated additively from all parents. |
 | `total_forecast_demand`         | Total demand from MRP Forecasts for this item and period.                                                                        |
