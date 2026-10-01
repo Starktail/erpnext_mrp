@@ -21,6 +21,11 @@ add_to_apps_screen = [
 	}
 ]
 
+# Serve the SPA for its client-side routes, so a page can be reloaded or linked to directly
+website_route_rules = [
+	{"from_route": "/erpnext_mrp/<path:app_path>", "to_route": "erpnext_mrp"},
+]
+
 # Includes in <head>
 # ------------------
 

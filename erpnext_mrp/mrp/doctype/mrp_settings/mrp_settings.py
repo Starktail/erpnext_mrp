@@ -5,8 +5,9 @@ from collections import namedtuple
 
 import frappe
 from frappe import _
+from frappe.model import no_value_fields
 from frappe.model.document import Document
-from frappe.utils import nowdate
+from frappe.utils import now_datetime, nowdate
 from frappe.utils.caching import redis_cache
 from frappe.utils.safe_exec import get_safe_globals
 
@@ -14,6 +15,44 @@ from frappe.utils.safe_exec import get_safe_globals
 class MRPSettings(Document):
 	def validate(self):
 		self.validate_condition()
+		if any(self.has_value_changed(fieldname) for fieldname in self.get_calculation_fields()):
+			self.calculation_settings_changed_on = now_datetime()
+
+	def get_calculation_fields(self) -> list[str]:
+		"""
+		The fields on the Calculation Settings tab. Changing any of them changes the MRP results,
+		unlike the display tabs, which only change how the same results are shown.
+		"""
+		fieldnames = []
+		in_calculation_tab = False
+		for df in self.meta.fields:
+			if df.fieldtype == "Tab Break":
+				in_calculation_tab = df.fieldname == "calculation_settings_tab"
+			elif (
+				in_calculation_tab
+				and df.fieldtype not in no_value_fields
+				and df.fieldname != "calculation_settings_changed_on"
+			):
+				fieldnames.append(df.fieldname)
+		return fieldnames
+
+	def on_update(self):
+		self.clear_stockout_flags()
+
+	def clear_stockout_flags(self):
+		"""
+		Stockout flags only mean something while suggestions are deferred within the lead time.
+		Clear them as soon as the setting is turned off, rather than leaving stale flags until
+		the next MRP run.
+		"""
+		if self.defer_suggestions_within_lead_time:
+			return
+		frappe.db.set_value(
+			"MRP Entry",
+			{"has_stockout": 1},
+			{"has_stockout": 0, "first_stockout_date": None, "stockout_qty": 0},
+			update_modified=False,
+		)
 
 	def validate_condition(self):
 		temp_doc = frappe.new_doc("Item")

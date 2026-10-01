@@ -24,6 +24,12 @@
           v-model="closed_column_field"
           placeholder="Select a field"
         />
+        <Button
+          v-if="expediteEnabled && expediteCount > 0"
+          theme="red"
+          @click="router.push('/expedite')"
+          >Expedite List ({{ expediteCount }})</Button
+        >
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
@@ -37,6 +43,13 @@
         >
         <div v-else class="text-sm" :class="mrpStatusClass">
           {{ lastMrpRunTime }}
+        </div>
+        <div
+          v-if="settingsChanged && mrpStatus !== 'running'"
+          class="text-sm text-amber-700"
+          title="A setting on the Calculation Settings tab of MRP Settings changed after the last MRP run. The plan still reflects the old settings."
+        >
+          Settings changed: rerun MRP
         </div>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-4 h-4 rounded" style="background-color: #ddeeff"></div>
@@ -491,6 +504,8 @@ import {
 } from 'vue'
 import { NDataTable, NInput, NInputNumber, NSpace, NDropdown } from 'naive-ui'
 import { useFilterPresets } from '../composables/useFilterPresets'
+import { useExpediteList } from '../composables/useExpediteList'
+import { useRouter } from 'vue-router'
 import {
   Button,
   Dialog,
@@ -510,6 +525,12 @@ const {
   remove: removePreset,
   load: loadPreset,
 } = useFilterPresets()
+const router = useRouter()
+const {
+  enabled: expediteEnabled,
+  count: expediteCount,
+  refresh: refreshExpediteList,
+} = useExpediteList()
 const showSavePresetModal = ref(false)
 const presetNameInput = ref('')
 
@@ -524,7 +545,11 @@ const showRerunDialog = ref(false)
 const showForecastWarning = ref(false)
 const mrpStatus = ref('idle') // 'idle' | 'running' | 'failed'
 const mrpErrors = ref([])
+const settingsChanged = ref(false)
 let mrpStatusPollTimer = null
+let lastKnownMrpRun = null
+// Set while a triggered run has not started yet, so the previous run's status is ignored
+let awaitingRunAfter = null
 const showBreakdownDialog = ref(false)
 const breakdownStack = ref([])
 const currentStockLevels = ref({})
@@ -777,7 +802,9 @@ const scrollX = ref(2500)
 const loadingRef = ref(true)
 
 function applyMrpStatus(status) {
+  lastKnownMrpRun = status.last_run
   mrpStatus.value = status.status
+  settingsChanged.value = Boolean(status.settings_changed)
   mrpErrors.value = status.errors ?? []
   if (status.status === 'running') {
     startMrpStatusPolling()
@@ -792,11 +819,16 @@ function startMrpStatusPolling() {
     const status = await call(
       'erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status',
     )
+    if (awaitingRunAfter !== null && status.last_run === awaitingRunAfter) {
+      return
+    }
+    awaitingRunAfter = null
     applyMrpStatus(status)
     if (status.status !== 'running') {
       currentStockLevels.value = {}
       executeAsyncQuery()
       last_mrp_run.reload()
+      refreshExpediteList()
     }
   }, 5000)
 }
@@ -820,6 +852,8 @@ const mrpRunCompleteHandler = () => {
   toast.success('MRP data refreshed')
   executeAsyncQuery()
   last_mrp_run.reload()
+  refreshExpediteList()
+  call('erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status').then(applyMrpStatus)
 }
 
 onMounted(async () => {
@@ -835,6 +869,7 @@ onMounted(async () => {
   }
   if (!presetLoaded) executeAsyncQuery()
   checkForecastCoverage()
+  refreshExpediteList()
   call('erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status').then(applyMrpStatus)
   window.frappe?.realtime?.on('mrp_run_started', mrpRunStartedHandler)
   window.frappe?.realtime?.on('mrp_run_complete', mrpRunCompleteHandler)
@@ -1123,6 +1158,27 @@ const columns = computed(() => {
                   },
                 },
                 '⚙',
+              ),
+            )
+          }
+          if (expediteEnabled.value && row.has_stockout) {
+            badges.push(
+              h(
+                'span',
+                {
+                  title: `Runs out of stock from ${new Date(
+                    row.first_stockout_date,
+                  ).toLocaleDateString()}, up to ${
+                    row.stockout_qty
+                  } short, before an order placed today can arrive. Click to open the Expedite List.`,
+                  style: {
+                    color: '#c0392b',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  },
+                  onClick: () => router.push('/expedite'),
+                },
+                '⏰',
               ),
             )
           }
@@ -1943,6 +1999,7 @@ function clearFilters() {
 
 function rerunMrp() {
   call('erpnext_mrp.mrp.tasks.mrp_run.trigger_mrp_run').then(() => {
+    awaitingRunAfter = lastKnownMrpRun
     mrpStatus.value = 'running'
     mrpErrors.value = []
     startMrpStatusPolling()

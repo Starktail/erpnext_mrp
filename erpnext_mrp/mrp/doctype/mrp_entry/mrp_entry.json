@@ -59,7 +59,12 @@
   "column_break_zpfl",
   "projected_on_hand_inventory_excl_reorder_level",
   "needs_reorder_excl_reorder_level",
-  "days_to_reorder_excl_reorder_level"
+  "days_to_reorder_excl_reorder_level",
+  "stockout_section",
+  "has_stockout",
+  "first_stockout_date",
+  "column_break_stko",
+  "stockout_qty"
  ],
  "fields": [
   {
@@ -363,12 +368,40 @@
    "fieldname": "total_payable",
    "fieldtype": "Currency",
    "label": "Total Orders Value Payable"
+  },
+  {
+   "depends_on": "eval:doc.has_stockout",
+   "fieldname": "stockout_section",
+   "fieldtype": "Section Break",
+   "label": "Stockout"
+  },
+  {
+   "default": "0",
+   "description": "Projected stock drops below zero in a period that no order placed today could still reach, because of the item's lead time. Only set when 'Only Suggest Orders That Can Arrive In Time' is enabled.",
+   "fieldname": "has_stockout",
+   "fieldtype": "Check",
+   "label": "Has Stockout"
+  },
+  {
+   "fieldname": "first_stockout_date",
+   "fieldtype": "Date",
+   "label": "First Stockout Date"
+  },
+  {
+   "fieldname": "column_break_stko",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The largest quantity projected stock falls below zero by, across the look-ahead.",
+   "fieldname": "stockout_qty",
+   "fieldtype": "Float",
+   "label": "Peak Stockout Qty"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-14 15:38:35.455957",
+ "modified": "2026-10-01 11:00:00.000000",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Entry",

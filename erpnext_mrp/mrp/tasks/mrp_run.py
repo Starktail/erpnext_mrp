@@ -889,6 +889,16 @@ def _calculate_suggested_receipts_batch(
 				(entry.on_hand_inventory_no_action or 0) - demand + (entry.scheduled_receipts or 0)
 			)
 
+		# A deferred shortage gets no suggested order, so it would otherwise vanish from view
+		# Flag it on the header row so the Expedite List can surface it.
+		stockout_entries = [
+			e for e in mrp_entry_docs if defer_within_lead_time and (e.projected_on_hand_inventory or 0) < 0
+		]
+		header = mrp_entry_docs[0]
+		header.has_stockout = 1 if stockout_entries else 0
+		header.first_stockout_date = stockout_entries[0].target_date if stockout_entries else None
+		header.stockout_qty = max((-e.projected_on_hand_inventory for e in stockout_entries), default=0)
+
 		# Use save() here so the row's metadata (modified/modified_by) and fetch_from fields materialise
 		for entry in mrp_entry_docs:
 			entry.save()
@@ -1396,6 +1406,146 @@ def get_forecast_demand_breakdown(item_code: str, week_key: str) -> dict:
 	}
 
 
+@frappe.whitelist()
+def get_expedite_list() -> list[dict]:
+	"""
+	Items that run out of stock before any order placed today could arrive, each with the open
+	Purchase Orders or Work Orders already inbound. Deferring suggestions within the lead time
+	means MRP no longer proposes an order for these shortages, so the only remedy left is to
+	pull the existing supply forward.
+	"""
+	frappe.has_permission("MRP Entry", "read", throw=True)
+
+	settings = frappe.get_cached_doc("MRP Settings")
+	if not settings.defer_suggestions_within_lead_time:
+		return []
+
+	items = frappe.get_all(
+		"MRP Entry",
+		filters={"is_header": 1, "has_stockout": 1},
+		fields=[
+			"item_code",
+			"item_name",
+			"item_group",
+			"uom",
+			"lead_time",
+			"is_manufactured",
+			"default_supplier",
+			"default_supplier_name",
+			"on_hand_inventory",
+			"first_stockout_date",
+			"stockout_qty",
+		],
+		order_by="first_stockout_date asc, item_code asc",
+	)
+	if not items:
+		return []
+
+	inbound = _fetch_inbound_supply([item.item_code for item in items], settings)
+	for item in items:
+		item.inbound = inbound.get(item.item_code, [])
+	return items
+
+
+@frappe.whitelist()
+def get_expedite_status() -> dict:
+	"""
+	Whether the Expedite List applies, how many items are on it, and whether the calculation
+	settings changed after MRP last ran. Until MRP reruns, the list reflects the old settings,
+	so the UI must say so rather than claim there are no stockouts.
+	"""
+	frappe.has_permission("MRP Entry", "read", throw=True)
+
+	settings = frappe.get_cached_doc("MRP Settings")
+	if not settings.defer_suggestions_within_lead_time:
+		return {"enabled": False, "count": 0, "needs_rerun": False}
+
+	return {
+		"enabled": True,
+		"count": frappe.db.count("MRP Entry", {"is_header": 1, "has_stockout": 1}),
+		"needs_rerun": _settings_changed_since_last_run(),
+	}
+
+
+def _settings_changed_since_last_run() -> bool:
+	"""
+	Whether a setting on the Calculation Settings tab changed after MRP last calculated the plan,
+	leaving the results out of date until MRP runs again.
+	"""
+	changed_on = frappe.get_cached_doc("MRP Settings").calculation_settings_changed_on
+	if not changed_on:
+		return False
+
+	last_calculated = frappe.db.get_value("MRP Entry", {"is_header": 1}, "max(modified)")
+	return not last_calculated or get_datetime(last_calculated) < get_datetime(changed_on)
+
+
+def _fetch_inbound_supply(item_codes: list[str], settings) -> dict[str, list[frappe._dict]]:
+	"""
+	Open Purchase Order and Work Order lines per item, dated the same way MRP books them as
+	scheduled receipts so the Expedite List agrees with the workbench.
+	"""
+	receiving_date_field = _resolve_po_item_date_column(settings.po_item_delivery_date_field, "schedule_date")
+
+	partial_receipt_condition = ""
+	if not settings.assume_remaining_qty:
+		partial_receipt_condition = "AND (po_item.received_qty = 0 OR po_item.received_qty IS NULL)"
+
+	po_lines = frappe.db.sql(
+		f"""# nosemgrep: frappe-sql-format-injection
+        SELECT
+            po_item.item_code,
+            'Purchase Order' AS doctype,
+            po.name,
+            po.supplier,
+            po.supplier_name,
+            po_item.`{receiving_date_field}` AS expected_date,
+            (po_item.qty - po_item.received_qty) * po_item.conversion_factor AS qty
+        FROM `tabPurchase Order Item` AS po_item
+        JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
+        WHERE
+            po_item.qty > po_item.received_qty
+            AND po.status NOT IN ('Closed', 'Delivered', 'Cancelled')
+            AND po.docstatus = 1
+            AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
+            AND po_item.item_code IN %(item_codes)s
+            {partial_receipt_condition}
+        """,
+		values={"item_codes": item_codes},
+		as_dict=True,
+	)  # nosemgrep
+
+	work_orders = frappe.db.sql(
+		"""
+        SELECT
+            production_item AS item_code,
+            'Work Order' AS doctype,
+            name,
+            NULL AS supplier,
+            NULL AS supplier_name,
+            planned_start_date AS expected_date,
+            qty - produced_qty AS qty
+        FROM `tabWork Order`
+        WHERE
+            status NOT IN ('Stopped', 'Completed', 'Closed', 'Cancelled')
+            AND docstatus = 1
+            AND qty > produced_qty
+            AND production_item IN %(item_codes)s
+        """,
+		values={"item_codes": item_codes},
+		as_dict=True,
+	)
+
+	lines = po_lines + work_orders
+	for line in lines:
+		line.expected_date = getdate(line.expected_date) if line.expected_date else None
+
+	grouped: dict[str, list[frappe._dict]] = {}
+	for line in sorted(lines, key=lambda line: line.expected_date or date.max):
+		grouped.setdefault(line.item_code, []).append(line)
+	return grouped
+
+
 def _process_suggested_receipts_for_level(
 	level: int,
 	stock_levels: list,
@@ -1679,6 +1829,13 @@ def _get_batch_jobs() -> list:
 @frappe.whitelist()
 def get_mrp_run_status() -> dict:
 	"""Return the current MRP run status for the UI status bar."""
+	status = _get_mrp_run_status()
+	status["settings_changed"] = _settings_changed_since_last_run()
+	return status
+
+
+def _get_mrp_run_status() -> dict:
+	last_run = None
 	last_log = frappe.get_all(
 		"Scheduled Job Log",
 		filters={"scheduled_job_type": "mrp_run.mrp_run"},
@@ -1692,6 +1849,13 @@ def get_mrp_run_status() -> dict:
 		if last_log[0].status == "Failed":
 			errors = [(last_log[0].details or "")[:500]]
 			return {"status": "failed", "last_run": str(last_run), "errors": errors}
+
+		# The run job itself is still rebuilding the entries, before any finalise batch exists.
+		# A log stuck on "Start" past the ceiling belongs to a dead worker, not a live run.
+		if last_log[0].status == "Start" and now_datetime() - get_datetime(last_run) < timedelta(
+			minutes=MRP_FINALISE_CEILING_MINUTES
+		):
+			return {"status": "running", "last_run": str(last_run), "errors": []}
 
 		batch_jobs = _get_batch_jobs()
 

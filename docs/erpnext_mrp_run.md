@@ -90,6 +90,8 @@ For each item at this level, the system calculates how much needs to be produced
 
 If **Only Suggest Orders That Can Arrive In Time** is enabled, step 4 is skipped for any period earlier than the item's lead time allows - an order placed today cannot be received before then. The shortfall is not discarded: it flows into `Projected On Hand Inventory` and carries forward as the next period's opening stock, so the first period that *can* be filled sees the accumulated deficit netted against every open Purchase Order arriving in between. If the pipeline has already covered the gap by that point, nothing is suggested at all. Items whose lead time extends past the end of the look-ahead horizon have their requirement placed in the final period, so it still surfaces rather than disappearing.
 
+Because no order is suggested in those early periods, `Projected On Hand Inventory` can fall below zero there: the item runs out of stock before anything ordered today could arrive, and only supply that is already open can close the gap. Such items are flagged with `has_stockout` on their header row and listed on the [Expedite List](erpnext_mrp_workbench.md#expedite-list). Only real stockouts count, so dipping below the safety stock while staying above zero does not flag an item.
+
 **Step 3 — Net demand explosion (all levels except the last)**
 
 Once `Suggested Receipts` is known for the current level, that quantity is exploded down to child components:
@@ -163,3 +165,6 @@ The following are the key fields calculated for each item in each period:
 | `days_to_reorder_excl_reorder_level` | Same as above, but calculated without the safety stock floor. Blank (`—`) when no true shortage (excluding safety stock) is projected. |
 | `needs_reorder`                 | Internal flag (`1`/`0`) set to `1` when a genuine shortage including safety stock was found. Used by the workbench to distinguish "order today" (`0` days) from "no action needed" (`—`). |
 | `needs_reorder_excl_reorder_level` | Same as above, but for the safety-stock-excluded calculation. |
+| `has_stockout`                  | Set to `1` when projected stock drops below zero in a period that no order placed today could still reach. Only set when **Only Suggest Orders That Can Arrive In Time** is enabled. Drives the [Expedite List](erpnext_mrp_workbench.md#expedite-list). |
+| `first_stockout_date`           | The target date of the first period in which projected stock is below zero. |
+| `stockout_qty`                  | The largest quantity projected stock falls below zero by, across the look-ahead. |
