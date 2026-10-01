@@ -8,6 +8,7 @@ The core of the MRP Tools is a background process that calculates the material p
 
 The `MRP Settings` doctype allows you to configure various parameters for the MRP calculation:
 
+-   **Exclude Warehouses from Inventory**: Warehouses whose stock should not count as on hand inventory, for example quarantine, display or customer-owned stock. Selecting a group warehouse excludes every warehouse below it. Warehouses marked as **Rejected Warehouses** are always excluded, whether listed here or not.
 -   **Custom Item Lead Time Field**: This setting allows you to select an Item DocField to be used as the primary lead time (in days) for procurement or manufacturing. By default, this is `lead_time_days`.
 -   **Item Additional Lead Time Field**: Optionally, you can select another Item DocField to add to the primary lead time. This is useful for incorporating custom lead time factors.
 -   **Custom Purchase Order Item Delivery Date Field**: This setting allows you to select a mandatory Date DocField from the `Purchase Order Item` doctype. This field will be used as the delivery date for calculating `Ordered Qty` in the MRP run. By default, `schedule_date` is used.
@@ -82,13 +83,15 @@ The raw signals are summed into planning totals for all items at the current lev
 
 For each item at this level, the system calculates how much needs to be produced or purchased, period by period, in chronological order:
 
-1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
+1. **Beginning Inventory**: `On Hand Inventory` for the first period is the current actual stock level, excluding any warehouses marked as **Rejected Warehouses** (`is_rejected_warehouse = 1`) and any warehouses listed in **Exclude Warehouses from Inventory** (including the warehouses below an excluded group). For subsequent periods it is the `Projected On Hand Inventory` from the previous period.
 2. **Net Requirements**: Total demand is determined by the "Requirement based on" setting (e.g., Forecast only, Open Orders + Forecast, etc.).
 3. **Shortage**: `shortage = on_hand_inventory + scheduled_receipts − demand − safety_stock`
 4. **Suggested Receipts**: If shortage < 0, the system orders enough to cover it, rounded up to the item's `Min Order Qty`. If stock and scheduled receipts are sufficient, `Suggested Receipts = 0` — no production is needed.
 5. **Projected Inventory**: `on_hand_inventory − demand + scheduled_receipts + suggested_receipts`
 
 If **Only Suggest Orders That Can Arrive In Time** is enabled, step 4 is skipped for any period earlier than the item's lead time allows - an order placed today cannot be received before then. The shortfall is not discarded: it flows into `Projected On Hand Inventory` and carries forward as the next period's opening stock, so the first period that *can* be filled sees the accumulated deficit netted against every open Purchase Order arriving in between. If the pipeline has already covered the gap by that point, nothing is suggested at all. Items whose lead time extends past the end of the look-ahead horizon have their requirement placed in the final period, so it still surfaces rather than disappearing.
+
+Because no order is suggested in those early periods, `Projected On Hand Inventory` can fall below zero there: the item runs out of stock before anything ordered today could arrive, and only supply that is already open can close the gap. Such items are flagged with `has_stockout` on their header row and listed on the [Expedite List](erpnext_mrp_workbench.md#expedite-list). Only real stockouts count, so dipping below the safety stock while staying above zero does not flag an item.
 
 **Step 3 — Net demand explosion (all levels except the last)**
 
@@ -143,7 +146,7 @@ The following are the key fields calculated for each item in each period:
 | `reorder_quantity`              | The minimum order quantity (MOQ) for the item, from the `Min Order Qty` field on the Item master.                                                                     |
 | `lead_time`                     | The lead time (in days) for procuring or manufacturing the item, derived from the 'Item Lead Time Field' and 'Item Additional Lead Time Field' in MRP Settings.       |
 | **Inventory & Demand**          |                                                                                                                                                                       |
-| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) is excluded.                        |
+| `on_hand_inventory`             | The stock on hand at the beginning of the period. Stock in warehouses marked as Rejected Warehouses (`is_rejected_warehouse = 1`) and in warehouses excluded in MRP Settings is excluded.                        |
 | `open_orders`                   | Total firm demand for the period: Reserved Qty (Sales Orders) + Reserved Qty for Production (Work Orders) + Upstream Net Demand. |
 | `upstream_net_demand`           | Net demand exploded from parent items at the level above. Written when a parent's `suggested_receipts > 0` and this item appears in the parent's BOM. Accumulated additively from all parents. |
 | `total_forecast_demand`         | Total demand from MRP Forecasts for this item and period.                                                                        |
@@ -163,3 +166,6 @@ The following are the key fields calculated for each item in each period:
 | `days_to_reorder_excl_reorder_level` | Same as above, but calculated without the safety stock floor. Blank (`—`) when no true shortage (excluding safety stock) is projected. |
 | `needs_reorder`                 | Internal flag (`1`/`0`) set to `1` when a genuine shortage including safety stock was found. Used by the workbench to distinguish "order today" (`0` days) from "no action needed" (`—`). |
 | `needs_reorder_excl_reorder_level` | Same as above, but for the safety-stock-excluded calculation. |
+| `has_stockout`                  | Set to `1` when projected stock drops below zero in a period that no order placed today could still reach. Only set when **Only Suggest Orders That Can Arrive In Time** is enabled. Drives the [Expedite List](erpnext_mrp_workbench.md#expedite-list). |
+| `first_stockout_date`           | The target date of the first period in which projected stock is below zero. |
+| `stockout_qty`                  | The largest quantity projected stock falls below zero by, across the look-ahead. |

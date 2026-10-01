@@ -1,4 +1,5 @@
 import json
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import frappe
@@ -11,34 +12,50 @@ def _bin_rows(*items: tuple[str, float]) -> list[frappe._dict]:
 	return [frappe._dict(item_code=code, actual_qty=qty) for code, qty in items]
 
 
+def _mock_bin_query(**kwargs):
+	"""
+	Patch the Bin query. The excluded warehouse lookup is stubbed too, since it also goes
+	through frappe.db.sql and would otherwise receive the fake Bin rows.
+	"""
+	stack = ExitStack()
+	stack.enter_context(patch("erpnext_mrp.api.get_excluded_warehouses", return_value=set()))
+	mock_sql = stack.enter_context(patch.object(frappe.db, "sql", **kwargs))
+	return stack, mock_sql
+
+
 class TestGetCurrentStockLevels(FrappeTestCase):
 	def test_returns_summed_qty_for_known_items(self):
 		rows = _bin_rows(("ITEM-A", 15.0), ("ITEM-B", 20.0))
-		with patch.object(frappe.db, "sql", return_value=rows):
+		stack, _ = _mock_bin_query(return_value=rows)
+		with stack:
 			result = get_current_stock_levels(json.dumps(["ITEM-A", "ITEM-B"]))
 		self.assertAlmostEqual(result["ITEM-A"], 15.0)
 		self.assertAlmostEqual(result["ITEM-B"], 20.0)
 
 	def test_empty_item_codes_returns_empty_dict(self):
-		with patch.object(frappe.db, "sql") as mock_sql:
+		stack, mock_sql = _mock_bin_query()
+		with stack:
 			result = get_current_stock_levels(json.dumps([]))
 		mock_sql.assert_not_called()
 		self.assertEqual(result, {})
 
 	def test_item_with_no_bin_is_absent_from_result(self):
-		with patch.object(frappe.db, "sql", return_value=[]):
+		stack, _ = _mock_bin_query(return_value=[])
+		with stack:
 			result = get_current_stock_levels(json.dumps(["NEVER-STOCKED"]))
 		self.assertNotIn("NEVER-STOCKED", result)
 
 	def test_accepts_list_directly(self):
 		rows = _bin_rows(("ITEM-C", 7.5))
-		with patch.object(frappe.db, "sql", return_value=rows):
+		stack, _ = _mock_bin_query(return_value=rows)
+		with stack:
 			result = get_current_stock_levels(["ITEM-C"])
 		self.assertAlmostEqual(result["ITEM-C"], 7.5)
 
 	def test_none_actual_qty_treated_as_zero(self):
 		rows = _bin_rows(("ITEM-D", None))
-		with patch.object(frappe.db, "sql", return_value=rows):
+		stack, _ = _mock_bin_query(return_value=rows)
+		with stack:
 			result = get_current_stock_levels(["ITEM-D"])
 		self.assertAlmostEqual(result["ITEM-D"], 0.0)
 

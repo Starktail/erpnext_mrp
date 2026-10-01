@@ -12,8 +12,10 @@
   "requirement_based_on",
   "assume_remaining_qty",
   "defer_suggestions_within_lead_time",
+  "calculation_settings_changed_on",
   "advanced_settings_section",
   "item_condition",
+  "excluded_warehouses",
   "item_lead_time_field",
   "item_additional_lead_time_field",
   "po_item_delivery_date_field",
@@ -96,6 +98,13 @@
    "fieldtype": "Code",
    "ignore_xss_filter": 1,
    "label": "Item Condition"
+  },
+  {
+   "description": "Stock in these warehouses is not counted as on hand inventory. Selecting a group warehouse excludes all warehouses below it. Rejected warehouses are always excluded.",
+   "fieldname": "excluded_warehouses",
+   "fieldtype": "Table MultiSelect",
+   "label": "Exclude Warehouses from Inventory",
+   "options": "MRP Excluded Warehouse"
   },
   {
    "fieldname": "calculation_settings_section",
@@ -183,6 +192,14 @@
    "fieldname": "defer_suggestions_within_lead_time",
    "fieldtype": "Check",
    "label": "Only Suggest Orders That Can Arrive In Time"
+  },
+  {
+   "description": "When a setting on this tab last changed. MRP results calculated before this are out of date until MRP runs again.",
+   "fieldname": "calculation_settings_changed_on",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "Calculation Settings Changed On",
+   "read_only": 1
   },
   {
    "fieldname": "vars_display_settings_section",
@@ -384,7 +401,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-03-13 12:31:11.960762",
+ "modified": "2026-10-01 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "MRP",
  "name": "MRP Settings",

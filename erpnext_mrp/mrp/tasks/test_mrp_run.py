@@ -7,13 +7,17 @@ import frappe
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, add_to_date
+from frappe.utils import add_days, add_to_date, now_datetime
 
+from erpnext_mrp.api import get_current_stock_levels
 from erpnext_mrp.mrp.tasks import mrp_run as mrp_run_module
 from erpnext_mrp.mrp.tasks.mrp_run import (
 	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
+	get_expedite_list,
+	get_expedite_status,
 	get_forecast_coverage_status,
+	get_mrp_run_status,
 	process_mrp_item_entries,
 )
 
@@ -2879,6 +2883,32 @@ class TestMRPFinaliseGuard(FrappeTestCase):
 			{"name": "job1", "job_name": self.JOB_NAME, "status": status, "creation": creation}
 		)
 
+	def _start_run(self, when):
+		# Frappe marks a running job's log "Start" with db_set, bypassing the Select options
+		log = frappe.get_doc(
+			{"doctype": "Scheduled Job Log", "scheduled_job_type": "mrp_run.mrp_run", "status": "Scheduled"}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value(
+			"Scheduled Job Log", log.name, {"status": "Start", "creation": when}, update_modified=False
+		)
+
+	def test_run_status_is_running_while_the_run_job_rebuilds_entries(self):
+		"""
+		Before any finalise batch is enqueued, the run job itself is still working. Reporting
+		idle then makes the workbench stop polling and miss the end of the run.
+		"""
+		self._start_run(now_datetime() - datetime.timedelta(minutes=1))
+		with patch.object(mrp_run_module, "_get_batch_jobs", return_value=[]):
+			self.assertEqual(get_mrp_run_status()["status"], "running")
+
+	def test_run_status_ignores_a_run_job_stuck_past_the_ceiling(self):
+		"""A log stuck on "Start" for longer than the ceiling belongs to a dead worker."""
+		self._start_run(
+			now_datetime() - datetime.timedelta(minutes=mrp_run_module.MRP_FINALISE_CEILING_MINUTES + 1)
+		)
+		with patch.object(mrp_run_module, "_get_batch_jobs", return_value=[]):
+			self.assertEqual(get_mrp_run_status()["status"], "idle")
+
 	def test_no_previous_run_is_not_in_progress(self):
 		with patch.object(mrp_run_module, "_get_batch_jobs", return_value=[]):
 			self.assertEqual(mrp_run_module._finalise_in_progress(), (False, False))
@@ -3233,4 +3263,317 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 			header.days_to_reorder,
 			21,
 			"An achievable shortage 28 days out with a 7 day lead time must report 21 days",
+		)
+
+	def test_deferred_shortage_is_flagged_as_stockout(self, mock_date):
+		"""
+		The inbound PO covers the gap, so no order is suggested -- but stock still runs out in
+		W2 before the PO lands in W4. That stockout must be flagged on the header row, or the
+		item silently drops off the planner's radar.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-FLAGGED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		create_purchase_order(item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		w2_entry = get_mrp_entry_by_item_week(item_code, w2)
+
+		self.assertEqual(header.has_stockout, 1, "Stock runs out before the PO arrives")
+		self.assertEqual(
+			header.first_stockout_date, w2_entry.target_date, "The stockout starts in W2, not later"
+		)
+		self.assertEqual(header.stockout_qty, 50, "W2 demand of 150 against 100 on hand is 50 short")
+
+	def test_expedite_list_returns_stockout_with_inbound_po(self, mock_date):
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-EXPEDITE"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		po = create_purchase_order(
+			item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		expedite_list = get_expedite_list()
+
+		self.assertEqual([item.item_code for item in expedite_list], [item_code])
+		inbound = expedite_list[0].inbound
+		self.assertEqual(len(inbound), 1, "The open PO is the supply to pull forward")
+		self.assertEqual(inbound[0].doctype, "Purchase Order")
+		self.assertEqual(inbound[0].name, po.name)
+		self.assertEqual(inbound[0].qty, 200)
+		self.assertEqual(inbound[0].expected_date, w4)
+
+	def test_fillable_shortage_is_not_a_stockout(self, mock_date):
+		"""
+		A shortage the lead time can still reach gets a suggested order, so stock never
+		actually runs out and there is nothing to expedite.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-FILLABLE"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+
+		self._setup_item(item_code, lead_time_days=7, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(header.has_stockout, 0)
+		self.assertEqual(get_expedite_list(), [])
+
+	def test_stockout_not_flagged_when_setting_disabled(self, mock_date):
+		"""
+		Without deferral every shortage is suggested in the period it occurs, so projected
+		stock never goes negative and the Expedite List stays empty.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-DISABLED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+		w4 = test_start + datetime.timedelta(weeks=4)
+
+		self.mrp_settings.defer_suggestions_within_lead_time = 0
+		self.mrp_settings.save()
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+		create_purchase_order(item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(header.has_stockout, 0)
+		self.assertEqual(get_expedite_list(), [])
+
+	def test_disabling_setting_clears_stockout_flags(self, mock_date):
+		"""
+		Turning the setting off must clear stockout flags straight away, not leave stale ones
+		behind until the next MRP run.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-CLEARED"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		self.assertEqual(get_mrp_entry_by_item_week(item_code, test_start).has_stockout, 1)
+
+		self.mrp_settings.defer_suggestions_within_lead_time = 0
+		self.mrp_settings.save()
+
+		header = get_mrp_entry_by_item_week(item_code, test_start)
+		self.assertEqual(header.has_stockout, 0)
+		self.assertIsNone(header.first_stockout_date)
+		self.assertEqual(header.stockout_qty, 0)
+
+	def test_expedite_status_needs_rerun_until_mrp_runs_after_switching_on(self, mock_date):
+		"""
+		Stockouts are only calculated during an MRP run. Switching the setting on after the
+		last run must report that a rerun is needed, rather than an empty list that reads as
+		"no stockouts".
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-STATUS"
+
+		w2 = test_start + datetime.timedelta(weeks=2)
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
+
+		self.mrp_settings.defer_suggestions_within_lead_time = 0
+		self.mrp_settings.save()
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		self.mrp_settings.defer_suggestions_within_lead_time = 1
+		self.mrp_settings.save()
+		self.assertEqual(
+			get_expedite_status(),
+			{"enabled": True, "count": 0, "needs_rerun": True},
+			"Switched on after the last run, so the stockouts are not calculated yet",
+		)
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		self.assertEqual(get_expedite_status(), {"enabled": True, "count": 1, "needs_rerun": False})
+
+	def test_any_calculation_setting_change_needs_rerun(self, mock_date):
+		"""
+		Every setting on the Calculation Settings tab changes the plan, so changing any of them
+		leaves the results out of date until MRP runs again.
+		"""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-SETTINGS-CHANGED"
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		self.assertFalse(get_mrp_run_status()["settings_changed"])
+
+		self.mrp_settings.look_ahead = 13
+		self.mrp_settings.save()
+
+		self.assertTrue(get_mrp_run_status()["settings_changed"])
+		self.assertTrue(get_expedite_status()["needs_rerun"])
+
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		self.assertFalse(get_mrp_run_status()["settings_changed"])
+
+	def test_display_setting_change_does_not_need_rerun(self, mock_date):
+		"""Display settings only change how the same results are shown, so no rerun is needed."""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-SETTINGS-DISPLAY"
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+
+		self.mrp_settings.render_supplier_name = int(not self.mrp_settings.render_supplier_name)
+		self.mrp_settings.suggested_orders_value = int(not self.mrp_settings.suggested_orders_value)
+		self.mrp_settings.save()
+
+		self.assertFalse(get_mrp_run_status()["settings_changed"])
+
+	def test_expedite_status_when_setting_disabled(self, mock_date):
+		self.mrp_settings.defer_suggestions_within_lead_time = 0
+		self.mrp_settings.save()
+
+		self.assertEqual(get_expedite_status(), {"enabled": False, "count": 0, "needs_rerun": False})
+
+
+@patch("erpnext_mrp.mrp.tasks.mrp_run.date")
+class TestExcludedWarehouses(FrappeTestCase):
+	"""
+	Stock in warehouses excluded in MRP Settings (and in any warehouse below an excluded group)
+	must not count as on hand inventory, just like stock in rejected warehouses.
+	"""
+
+	TEST_START = datetime.date(2025, 11, 3)
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("MRP Entry")
+		frappe.db.delete("MRP Forecast")
+		frappe.db.delete("Stock Entry")
+		frappe.db.delete("Stock Ledger Entry")
+		frappe.db.delete("Bin")
+
+		if not frappe.db.exists("MRP Settings", "MRP Settings"):
+			mrp_settings = frappe.new_doc("MRP Settings")
+		else:
+			mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.look_ahead = 4
+		mrp_settings.periods_type = "Calendar Week"
+		mrp_settings.requirement_based_on = "Forecast only"
+		mrp_settings.item_lead_time_field = "lead_time_days | Lead Time in days"
+		mrp_settings.item_additional_lead_time_field = ""
+		mrp_settings.set("excluded_warehouses", [])
+		mrp_settings.save()
+		self.mrp_settings = mrp_settings
+
+	def tearDown(self):
+		mrp_settings = frappe.get_doc("MRP Settings", "MRP Settings")
+		mrp_settings.item_condition = ""
+		mrp_settings.set("excluded_warehouses", [])
+		mrp_settings.save()
+		super().tearDown()
+
+	def _setup_item(self, item_code: str, stock: dict[str, int]):
+		create_item(item_code, item_code, "_Test Item Group A", lead_time_days=7)
+		self.mrp_settings.item_condition = f"doc.item_code == '{item_code}'"
+		self.mrp_settings.save()
+
+		for warehouse, qty in stock.items():
+			make_stock_entry(
+				item_code=item_code,
+				posting_date=add_days(self.TEST_START, -1),
+				qty=qty,
+				to_warehouse=warehouse,
+				rate=10,
+				purpose="Material Receipt",
+			)
+
+	def _exclude(self, *warehouses: str):
+		self.mrp_settings.set("excluded_warehouses", [{"warehouse": w} for w in warehouses])
+		self.mrp_settings.save()
+
+	def _on_hand(self, item_code: str) -> float:
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		return get_mrp_entry_by_item_week(item_code, self.TEST_START).on_hand_inventory
+
+	def test_stock_in_excluded_warehouse_is_not_on_hand(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-DIRECT"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse 1 - _TC": 50})
+
+		self.assertEqual(self._on_hand(item_code), 150, "Without exclusions all stock counts")
+
+		self._exclude("_Test Warehouse 1 - _TC")
+		self.assertEqual(self._on_hand(item_code), 100, "The excluded warehouse's 50 must not count")
+
+	def test_excluding_a_group_excludes_its_child_warehouses(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-GROUP"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse Group-C1 - _TC": 30})
+
+		self._exclude("_Test Warehouse Group - _TC")
+		self.assertEqual(self._on_hand(item_code), 100, "Stock below an excluded group must not count")
+
+	def test_current_stock_levels_skip_excluded_warehouses(self, mock_date):
+		"""The workbench's out-of-sync check must compare like with like."""
+		mock_date.today.return_value = self.TEST_START
+		item_code = "EXCL-WH-CURRENT"
+		self._setup_item(item_code, {"_Test Warehouse - _TC": 100, "_Test Warehouse 1 - _TC": 50})
+		self._exclude("_Test Warehouse 1 - _TC")
+
+		self.assertEqual(get_current_stock_levels([item_code]), {item_code: 100})
+
+	def test_changing_excluded_warehouses_needs_rerun(self, mock_date):
+		mock_date.today.return_value = self.TEST_START
+		self._exclude("_Test Warehouse 1 - _TC")
+		changed_on = frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on")
+
+		# Saving the same exclusions again is not a change
+		self.mrp_settings.reload()
+		self.mrp_settings.save()
+		self.assertEqual(
+			frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on"), changed_on
+		)
+
+		self._exclude("_Test Warehouse 1 - _TC", "_Test Warehouse 2 - _TC")
+		self.assertGreater(
+			frappe.db.get_single_value("MRP Settings", "calculation_settings_changed_on"), changed_on
 		)

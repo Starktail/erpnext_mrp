@@ -3,6 +3,8 @@ import json
 import frappe
 from frappe.config import get_modules_from_all_apps_for_user
 
+from erpnext_mrp.mrp.doctype.mrp_settings.mrp_settings import get_excluded_warehouses
+
 
 @frappe.whitelist()
 def get_current_stock_levels(item_codes: list[str] | str) -> dict[str, float]:
@@ -15,12 +17,11 @@ def get_current_stock_levels(item_codes: list[str] | str) -> dict[str, float]:
 		SELECT item_code, SUM(actual_qty) AS actual_qty
 		FROM tabBin
 		WHERE item_code IN %(codes)s
-		AND warehouse NOT IN (
-			SELECT name FROM `tabWarehouse` WHERE is_rejected_warehouse = 1
-		)
+		AND warehouse NOT IN %(excluded_warehouses)s
 		GROUP BY item_code
 		""",
-		{"codes": codes},
+		# The empty string keeps the IN list valid when nothing is excluded
+		{"codes": codes, "excluded_warehouses": [*get_excluded_warehouses(), ""]},
 		as_dict=True,
 	)
 	return {r.item_code: float(r.actual_qty or 0) for r in rows}
