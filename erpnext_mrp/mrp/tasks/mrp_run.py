@@ -1487,54 +1487,48 @@ def _fetch_inbound_supply(item_codes: list[str], settings) -> dict[str, list[fra
 	"""
 	receiving_date_field = _resolve_po_item_date_column(settings.po_item_delivery_date_field, "schedule_date")
 
-	partial_receipt_condition = ""
-	if not settings.assume_remaining_qty:
-		partial_receipt_condition = "AND (po_item.received_qty = 0 OR po_item.received_qty IS NULL)"
-
-	po_lines = frappe.db.sql(
-		f"""# nosemgrep: frappe-sql-format-injection
-        SELECT
-            po_item.item_code,
-            'Purchase Order' AS doctype,
-            po.name,
-            po.supplier,
-            po.supplier_name,
-            po_item.`{receiving_date_field}` AS expected_date,
-            (po_item.qty - po_item.received_qty) * po_item.conversion_factor AS qty
-        FROM `tabPurchase Order Item` AS po_item
-        JOIN `tabPurchase Order` AS po ON po_item.parent = po.name
-        WHERE
-            po_item.qty > po_item.received_qty
-            AND po.status NOT IN ('Closed', 'Delivered', 'Cancelled')
-            AND po.docstatus = 1
-            AND (po_item.delivered_by_supplier IS NULL OR po_item.delivered_by_supplier = 0)
-            AND po_item.item_code IN %(item_codes)s
-            {partial_receipt_condition}
-        """,
-		values={"item_codes": item_codes},
-		as_dict=True,
-	)  # nosemgrep
-
-	work_orders = frappe.db.sql(
-		"""
-        SELECT
-            production_item AS item_code,
-            'Work Order' AS doctype,
-            name,
-            NULL AS supplier,
-            NULL AS supplier_name,
-            planned_start_date AS expected_date,
-            qty - produced_qty AS qty
-        FROM `tabWork Order`
-        WHERE
-            status NOT IN ('Stopped', 'Completed', 'Closed', 'Cancelled')
-            AND docstatus = 1
-            AND qty > produced_qty
-            AND production_item IN %(item_codes)s
-        """,
-		values={"item_codes": item_codes},
-		as_dict=True,
+	po = frappe.qb.DocType("Purchase Order")
+	po_item = frappe.qb.DocType("Purchase Order Item")
+	po_query = (
+		frappe.qb.from_(po_item)
+		.join(po)
+		.on(po_item.parent == po.name)
+		.select(
+			po_item.item_code,
+			po.name,
+			po.supplier,
+			po.supplier_name,
+			getattr(po_item, receiving_date_field).as_("expected_date"),
+			((po_item.qty - po_item.received_qty) * po_item.conversion_factor).as_("qty"),
+		)
+		.where(po_item.qty > po_item.received_qty)
+		.where(po.status.notin(["Closed", "Delivered", "Cancelled"]))
+		.where(po.docstatus == 1)
+		.where(po_item.delivered_by_supplier.isnull() | (po_item.delivered_by_supplier == 0))
+		.where(po_item.item_code.isin(item_codes))
 	)
+	if not settings.assume_remaining_qty:
+		po_query = po_query.where(po_item.received_qty.isnull() | (po_item.received_qty == 0))
+	po_lines = po_query.run(as_dict=True)
+	for line in po_lines:
+		line.doctype = "Purchase Order"
+
+	work_order = frappe.qb.DocType("Work Order")
+	work_orders = (
+		frappe.qb.from_(work_order)
+		.select(
+			work_order.production_item.as_("item_code"),
+			work_order.name,
+			work_order.planned_start_date.as_("expected_date"),
+			(work_order.qty - work_order.produced_qty).as_("qty"),
+		)
+		.where(work_order.status.notin(["Stopped", "Completed", "Closed", "Cancelled"]))
+		.where(work_order.docstatus == 1)
+		.where(work_order.qty > work_order.produced_qty)
+		.where(work_order.production_item.isin(item_codes))
+	).run(as_dict=True)
+	for line in work_orders:
+		line.doctype = "Work Order"
 
 	lines = po_lines + work_orders
 	for line in lines:
