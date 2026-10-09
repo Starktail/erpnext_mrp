@@ -14,9 +14,8 @@ from erpnext_mrp.mrp.tasks import mrp_run as mrp_run_module
 from erpnext_mrp.mrp.tasks.mrp_run import (
 	_NO_REORDER_SENTINEL,
 	create_mrp_item_entries,
-	get_expedite_list,
-	get_expedite_status,
 	get_forecast_coverage_status,
+	get_inbound_supply,
 	get_mrp_run_status,
 	process_mrp_item_entries,
 )
@@ -2178,6 +2177,11 @@ def create_sales_order(
 	return so
 
 
+def _week_key(day: datetime.date) -> str:
+	year, week, _weekday = day.isocalendar()
+	return f"{year}-W{week:02d}"
+
+
 def create_purchase_order(
 	item_code: str, qty: int, delivery_date: datetime.datetime, transaction_date: datetime.datetime
 ):
@@ -3294,32 +3298,59 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 		)
 		self.assertEqual(header.stockout_qty, 50, "W2 demand of 150 against 100 on hand is 50 short")
 
-	def test_expedite_list_returns_stockout_with_inbound_po(self, mock_date):
+	def test_inbound_supply_lists_open_orders_by_booked_week(self, mock_date):
+		"""
+		The open PO is the supply to pull forward. Filtered by week, it must appear only in the
+		week MRP books it as a scheduled receipt, so the drilldown matches the cell clicked.
+		"""
 		test_start = datetime.date(2025, 11, 3)
 		mock_date.today.return_value = test_start
-		item_code = "LT-STOCKOUT-EXPEDITE"
+		item_code = "LT-STOCKOUT-INBOUND"
 
 		w2 = test_start + datetime.timedelta(weeks=2)
 		w4 = test_start + datetime.timedelta(weeks=4)
 
 		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
-		create_mrp_forecast({"item_code": item_code, "forecast_date": w2, "forecast_quantity": 150})
 		po = create_purchase_order(
 			item_code=item_code, qty=200, delivery_date=w4, transaction_date=test_start
 		)
 
-		create_mrp_item_entries()
-		process_mrp_item_entries(enqueue=False)
-
-		expedite_list = get_expedite_list()
-
-		self.assertEqual([item.item_code for item in expedite_list], [item_code])
-		inbound = expedite_list[0].inbound
-		self.assertEqual(len(inbound), 1, "The open PO is the supply to pull forward")
+		inbound = get_inbound_supply(item_code)
+		self.assertEqual(len(inbound), 1)
 		self.assertEqual(inbound[0].doctype, "Purchase Order")
 		self.assertEqual(inbound[0].name, po.name)
 		self.assertEqual(inbound[0].qty, 200)
 		self.assertEqual(inbound[0].expected_date, w4)
+
+		self.assertEqual([line.name for line in get_inbound_supply(item_code, _week_key(w4))], [po.name])
+		self.assertEqual(get_inbound_supply(item_code, _week_key(w2)), [])
+
+	def test_inbound_supply_books_overdue_orders_in_the_current_week(self, mock_date):
+		"""An overdue PO is a scheduled receipt in the current week, not in the past."""
+		test_start = datetime.date(2025, 11, 3)
+		mock_date.today.return_value = test_start
+		item_code = "LT-STOCKOUT-OVERDUE"
+
+		self._setup_item(item_code, lead_time_days=56, on_hand=100, test_start=test_start)
+		po = create_purchase_order(
+			item_code=item_code,
+			qty=50,
+			delivery_date=test_start - datetime.timedelta(weeks=1),
+			transaction_date=test_start - datetime.timedelta(weeks=3),
+		)
+
+		self.assertEqual(
+			[line.name for line in get_inbound_supply(item_code, _week_key(test_start))], [po.name]
+		)
+
+		# Results from last week's run still book it in that run's first week, which is the
+		# week shown on the workbench until MRP reruns
+		create_mrp_item_entries()
+		process_mrp_item_entries(enqueue=False)
+		mock_date.today.return_value = test_start + datetime.timedelta(weeks=1)
+		self.assertEqual(
+			[line.name for line in get_inbound_supply(item_code, _week_key(test_start))], [po.name]
+		)
 
 	def test_fillable_shortage_is_not_a_stockout(self, mock_date):
 		"""
@@ -3340,7 +3371,6 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 
 		header = get_mrp_entry_by_item_week(item_code, test_start)
 		self.assertEqual(header.has_stockout, 0)
-		self.assertEqual(get_expedite_list(), [])
 
 	def test_stockout_not_flagged_when_setting_disabled(self, mock_date):
 		"""
@@ -3366,7 +3396,6 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 
 		header = get_mrp_entry_by_item_week(item_code, test_start)
 		self.assertEqual(header.has_stockout, 0)
-		self.assertEqual(get_expedite_list(), [])
 
 	def test_disabling_setting_clears_stockout_flags(self, mock_date):
 		"""
@@ -3394,10 +3423,10 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 		self.assertIsNone(header.first_stockout_date)
 		self.assertEqual(header.stockout_qty, 0)
 
-	def test_expedite_status_needs_rerun_until_mrp_runs_after_switching_on(self, mock_date):
+	def test_switching_setting_on_needs_rerun_before_stockouts_show(self, mock_date):
 		"""
 		Stockouts are only calculated during an MRP run. Switching the setting on after the
-		last run must report that a rerun is needed, rather than an empty list that reads as
+		last run must report that a rerun is needed, rather than an empty column that reads as
 		"no stockouts".
 		"""
 		test_start = datetime.date(2025, 11, 3)
@@ -3416,15 +3445,16 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 
 		self.mrp_settings.defer_suggestions_within_lead_time = 1
 		self.mrp_settings.save()
-		self.assertEqual(
-			get_expedite_status(),
-			{"enabled": True, "count": 0, "needs_rerun": True},
+		self.assertTrue(
+			get_mrp_run_status()["settings_changed"],
 			"Switched on after the last run, so the stockouts are not calculated yet",
 		)
+		self.assertEqual(frappe.db.count("MRP Entry", {"has_stockout": 1}), 0)
 
 		create_mrp_item_entries()
 		process_mrp_item_entries(enqueue=False)
-		self.assertEqual(get_expedite_status(), {"enabled": True, "count": 1, "needs_rerun": False})
+		self.assertFalse(get_mrp_run_status()["settings_changed"])
+		self.assertEqual(frappe.db.count("MRP Entry", {"has_stockout": 1}), 1)
 
 	def test_any_calculation_setting_change_needs_rerun(self, mock_date):
 		"""
@@ -3444,7 +3474,6 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 		self.mrp_settings.save()
 
 		self.assertTrue(get_mrp_run_status()["settings_changed"])
-		self.assertTrue(get_expedite_status()["needs_rerun"])
 
 		create_mrp_item_entries()
 		process_mrp_item_entries(enqueue=False)
@@ -3465,12 +3494,6 @@ class TestSuggestionsWithinLeadTime(FrappeTestCase):
 		self.mrp_settings.save()
 
 		self.assertFalse(get_mrp_run_status()["settings_changed"])
-
-	def test_expedite_status_when_setting_disabled(self, mock_date):
-		self.mrp_settings.defer_suggestions_within_lead_time = 0
-		self.mrp_settings.save()
-
-		self.assertEqual(get_expedite_status(), {"enabled": False, "count": 0, "needs_rerun": False})
 
 
 @patch("erpnext_mrp.mrp.tasks.mrp_run.date")

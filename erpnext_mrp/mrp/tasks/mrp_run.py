@@ -1407,64 +1407,36 @@ def get_forecast_demand_breakdown(item_code: str, week_key: str) -> dict:
 
 
 @frappe.whitelist()
-def get_expedite_list() -> list[dict]:
+def get_inbound_supply(item_code: str, week_key: str | None = None) -> list[dict]:
 	"""
-	Items that run out of stock before any order placed today could arrive, each with the open
-	Purchase Orders or Work Orders already inbound. Deferring suggestions within the lead time
-	means MRP no longer proposes an order for these shortages, so the only remedy left is to
-	pull the existing supply forward.
+	Open Purchase Orders and Work Orders for an item: the supply to pull forward when the item
+	runs out before a new order could arrive. Given a week, only the orders MRP books as
+	scheduled receipts in that week.
 	"""
 	frappe.has_permission("MRP Entry", "read", throw=True)
 
 	settings = frappe.get_cached_doc("MRP Settings")
-	if not settings.defer_suggestions_within_lead_time:
-		return []
+	lines = _fetch_inbound_supply([item_code], settings).get(item_code, [])
+	if not week_key:
+		return lines
 
-	items = frappe.get_all(
-		"MRP Entry",
-		filters={"is_header": 1, "has_stockout": 1},
-		fields=[
-			"item_code",
-			"item_name",
-			"item_group",
-			"uom",
-			"lead_time",
-			"is_manufactured",
-			"default_supplier",
-			"default_supplier_name",
-			"on_hand_inventory",
-			"first_stockout_date",
-			"stockout_qty",
-		],
-		order_by="first_stockout_date asc, item_code asc",
+	# MRP books overdue orders as scheduled receipts in the first period of the run, which is
+	# not necessarily this week when the results are from an earlier run
+	first_period = getdate(
+		frappe.db.get_value("MRP Entry", {"item_code": item_code, "is_header": 1}, "target_date")
+		or date.today()
 	)
-	if not items:
-		return []
+	calendar_week = _week_key_to_calendar_week(week_key)
+	return [
+		line
+		for line in lines
+		if line.expected_date and _calendar_week(max(line.expected_date, first_period)) == calendar_week
+	]
 
-	inbound = _fetch_inbound_supply([item.item_code for item in items], settings)
-	for item in items:
-		item.inbound = inbound.get(item.item_code, [])
-	return items
 
-
-@frappe.whitelist()
-def get_expedite_status() -> dict:
-	"""
-	Whether the Expedite List applies, how many items are on it, and whether the calculation
-	settings changed after MRP last ran. Until MRP reruns, the list reflects the old settings,
-	so the UI must say so rather than claim there are no stockouts.
-	"""
-	frappe.has_permission("MRP Entry", "read", throw=True)
-
-	settings = frappe.get_cached_doc("MRP Settings")
-	if not settings.defer_suggestions_within_lead_time:
-		return {"enabled": False, "count": 0, "needs_rerun": False}
-
-	return {
-		"enabled": True,
-		"count": frappe.db.count("MRP Entry", {"is_header": 1, "has_stockout": 1}),
-		"needs_rerun": _settings_changed_since_last_run(),
-	}
+def _calendar_week(day: date) -> str:
+	year, week, _weekday = day.isocalendar()
+	return f"{year}CW{week:02d}"
 
 
 def _settings_changed_since_last_run() -> bool:

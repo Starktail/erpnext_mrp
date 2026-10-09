@@ -11,11 +11,6 @@ const routes = [
     name: 'Forecast',
     component: () => import('@/pages/Forecast.vue'),
   },
-  {
-    path: '/expedite',
-    name: 'ExpediteList',
-    component: () => import('@/pages/ExpediteList.vue'),
-  },
 ]
 
 let router = createRouter({
