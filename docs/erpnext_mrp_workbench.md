@@ -35,7 +35,7 @@ The workbench includes several features to help you analyze and manage your mate
     -   <span style="background-color: #eab26eff;">Orange Highlight</span>: Indicates a **P2 - Attention** urgent item. This means there is enough quantity on order, but it's scheduled to arrive late.
     -   **P3 - Optional** urgent items (ordered but stock will be below safety stock) do not have a specific row highlight but are indicated by the `Urgency Level` column.
     -   <span style="background-color: #ddeeff;">Blue Highlight</span>: Indicates a cell with a **Suggested Order** greater than zero, highlighting the need to place a purchase or work order.
-    -   **⏰ Stockout Indicator**: A red alarm clock shown next to an item code when the item runs out of stock before an order placed today could arrive. Hover over it to see when the stockout starts and how short the item gets; click it to open the [Expedite List](#expedite-list). Only shown when **Only Suggest Orders That Can Arrive In Time** is enabled in MRP Settings.
+    -   **⏰ Stockout Indicator**: A red alarm clock shown next to an item code when the item runs out of stock before an order placed today could arrive. Hover over it to see when the stockout starts and how short the item gets; click it to see the open orders to expedite (see [Stockouts](#stockouts)). Only shown when **Only Suggest Orders That Can Arrive In Time** is enabled in MRP Settings.
     -   **⚠ Out-of-Sync Indicator**: A warning icon shown next to an item code when the item's current stock level (live `tabBin` data) differs from the stock level recorded at the time of the last MRP run. Hover over the icon to see a tooltip with the stored value, the current value, and the signed delta (e.g. `Stock changed since last MRP run: was 100, now 85 (-15.00)`). The indicator clears automatically after the next MRP run completes and the workbench reloads. Items that have never been stocked (no warehouse bins) will not show the indicator.
 -   **Create Material Request**: This is the primary action on the workbench.
     1.  **Select Rows**: Use the checkboxes to select one or more item rows that have suggested orders.
@@ -44,18 +44,16 @@ The workbench includes several features to help you analyze and manage your mate
     4.  **Creation**: Upon confirmation, the system automatically creates Purchase-type Material Requests. The items are intelligently grouped into separate Material Requests based on their `Default Supplier`. If no supplier is specified, items are grouped into a single request.
     5.  **Success Notification**: A final dialog shows the names of the newly created Material Requests, with links to navigate directly to them.
 
-### Expedite List
+### Stockouts
 
-When **Only Suggest Orders That Can Arrive In Time** is enabled in [MRP Settings](erpnext_mrp_run.md#mrp-settings), MRP no longer suggests orders that cannot arrive in time. A shortage inside an item's lead time therefore no longer shows up as a suggested order, even though the item will still run out of stock. The Expedite List brings these items back into view.
+When **Only Suggest Orders That Can Arrive In Time** is enabled in [MRP Settings](erpnext_mrp_run.md#mrp-settings), MRP no longer suggests orders that cannot arrive in time. A shortage inside an item's lead time therefore no longer shows up as a suggested order, even though the item will still run out of stock. The workbench keeps these items in view; all of the following is hidden while the setting is disabled:
 
-Open it from **Expedite List** in the sidebar (indented below MRP Workbench, with the number of affected items), or from the red **Expedite List (n)** button on the workbench, which appears whenever at least one item is affected. Both are hidden while the setting is disabled.
+-   **Stockout From** column: the first week in which the item's projected stock is below zero, in red. Hover over it for the peak shortage. Its filter popover has **Only items with a stockout**, which narrows the workbench to the affected items; the filter is saved with filter presets.
+-   **Peak Shortage** column: the largest quantity the item falls short by across the look-ahead.
+-   Sorting by either column keeps the items with a stockout above the rest in both directions. Shows `—` for items without a stockout.
+-   **⏰ Stockout Indicator**: click it to open the item's open Purchase Orders (for purchased items) and Work Orders (for manufactured items), with the remaining quantity, supplier and due date, each linking to the document. These are the orders to pull forward. Dates already in the past are shown in red as **overdue**. If nothing is inbound, there is no supply to expedite and the item must be ordered immediately.
+-   **Scheduled Receipts drilldown**: in an expanded item, click a **Scheduled Receipts** value to see the Purchase Orders and Work Orders behind it in that week. Overdue orders are counted in the first week of the plan, and appear there.
 
-Each row is one item whose projected stock drops below zero, sorted by the date the stockout starts:
+Only real stockouts count. An item that dips below its safety stock but stays above zero is not flagged.
 
--   **Stockout From**: The first week in which projected stock is below zero.
--   **Peak Shortage**: The largest quantity the item falls short by across the look-ahead.
--   **Inbound Supply to Expedite**: The open Purchase Orders (for purchased items) and Work Orders (for manufactured items) for the item, with the remaining quantity and expected date, each linking to the document. These are the orders to pull forward. Dates already in the past are shown in red as **overdue**. If nothing is inbound, the row says so: there is no supply to expedite and the item must be ordered immediately.
-
-Only real stockouts are listed. An item that dips below its safety stock but stays above zero is not included. The list refreshes automatically when an MRP run completes.
-
-Stockouts are calculated during the MRP run, so after a change to the calculation settings the Expedite List page shows a warning above the list until MRP runs again (see **Settings Changed Indicator** above). Switching the setting off clears all stockout flags straight away.
+Stockouts are calculated during the MRP run, so after a change to the calculation settings they are out of date until MRP runs again (see **Settings Changed Indicator** above). Switching the setting off clears all stockout flags straight away.

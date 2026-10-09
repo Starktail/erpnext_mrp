@@ -24,12 +24,6 @@
           v-model="closed_column_field"
           placeholder="Select a field"
         />
-        <Button
-          v-if="expediteEnabled && expediteCount > 0"
-          theme="red"
-          @click="router.push('/expedite')"
-          >Expedite List ({{ expediteCount }})</Button
-        >
       </div>
       <!-- Colour Legend -->
       <div class="flex items-center gap-4">
@@ -401,6 +395,74 @@
         <Button @click="showBreakdownDialog = false">Close</Button>
       </template>
     </Dialog>
+    <Dialog
+      v-model="showInboundDialog"
+      @hide="showInboundDialog = false"
+      :options="{ size: 'xl' }"
+    >
+      <template #body-title>
+        <h3 class="text-xl font-semibold text-ink-gray-9">
+          {{ inboundTitle }}
+        </h3>
+      </template>
+      <template #body-content>
+        <p v-if="inboundStockout" class="mb-3 text-sm text-red-600">
+          {{ inboundStockout }}
+        </p>
+        <div v-if="inboundLoading" class="text-sm text-gray-600">Loading…</div>
+        <div v-else-if="inboundError" class="text-sm text-red-600">
+          Failed to load the open orders: {{ inboundError }}
+        </div>
+        <div v-else-if="!inboundLines.length" class="text-sm text-gray-600">
+          No open Purchase Orders or Work Orders: nothing inbound to expedite.
+        </div>
+        <table v-else class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-gray-600 border-b">
+              <th class="py-1 pr-4 font-normal">Order</th>
+              <th class="py-1 pr-4 font-normal">Supplier</th>
+              <th class="py-1 pr-4 font-normal text-right">Qty</th>
+              <th class="py-1 font-normal">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(line, idx) in inboundLines"
+              :key="idx"
+              class="border-b last:border-0"
+            >
+              <td class="py-1 pr-4 whitespace-nowrap">
+                <a
+                  :href="`/app/${line.doctype
+                    .toLowerCase()
+                    .replace(/ /g, '-')}/${line.name}`"
+                  target="_blank"
+                  class="text-blue-600 hover:underline"
+                  >{{ line.name }}</a
+                >
+              </td>
+              <td class="py-1 pr-4">{{ line.supplier_name || '' }}</td>
+              <td class="py-1 pr-4 text-right">{{ line.qty }}</td>
+              <td
+                class="py-1 whitespace-nowrap"
+                :class="isOverdue(line.expected_date) ? 'text-red-600' : ''"
+              >
+                {{
+                  line.expected_date
+                    ? `${
+                        isOverdue(line.expected_date) ? 'overdue ' : ''
+                      }${formatDate(line.expected_date)}`
+                    : ''
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <template #actions>
+        <Button @click="showInboundDialog = false">Close</Button>
+      </template>
+    </Dialog>
     <Dialog v-model="showCreateDialog" @hide="showCreateDialog = false">
       <template #body-title>
         <h3 class="text-2xl font-semibold text-ink-gray-9">
@@ -504,8 +566,6 @@ import {
 } from 'vue'
 import { NDataTable, NInput, NInputNumber, NSpace, NDropdown } from 'naive-ui'
 import { useFilterPresets } from '../composables/useFilterPresets'
-import { useExpediteList } from '../composables/useExpediteList'
-import { useRouter } from 'vue-router'
 import {
   Button,
   Dialog,
@@ -525,12 +585,6 @@ const {
   remove: removePreset,
   load: loadPreset,
 } = useFilterPresets()
-const router = useRouter()
-const {
-  enabled: expediteEnabled,
-  count: expediteCount,
-  refresh: refreshExpediteList,
-} = useExpediteList()
 const showSavePresetModal = ref(false)
 const presetNameInput = ref('')
 
@@ -610,6 +664,10 @@ const appliedNumberFilters = reactive({
   days_to_reorder_excl_reorder_level: { min: null, max: null },
 })
 
+// Yes/no filters, kept apart from the number filters so presets can store them as-is
+const flagFilters = reactive({ has_stockout: false })
+const appliedFlagFilters = reactive({ has_stockout: false })
+
 const LABEL_STYLE = { marginBottom: '4px', fontSize: '11px', color: '#888' }
 
 function commitTextFilter(columnKey, hide) {
@@ -677,6 +735,50 @@ function renderTextFilter(columnKey, placeholder) {
       ]),
     ])
   }
+}
+
+function renderFlagFilter(columnKey, label) {
+  return ({ hide }) =>
+    h('div', { style: { padding: '8px', width: '250px' } }, [
+      h(Checkbox, {
+        label,
+        modelValue: flagFilters[columnKey],
+        'onUpdate:modelValue': (v) => {
+          flagFilters[columnKey] = v
+        },
+        style: { marginBottom: '8px' },
+      }),
+      h(NSpace, { justify: 'end' }, () => [
+        h(
+          Button,
+          {
+            size: 'sm',
+            onClick: () => {
+              flagFilters[columnKey] = false
+              appliedFlagFilters[columnKey] = false
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Clear',
+        ),
+        h(
+          Button,
+          {
+            size: 'sm',
+            variant: 'solid',
+            onClick: () => {
+              appliedFlagFilters[columnKey] = flagFilters[columnKey]
+              paginationReactive.page = 1
+              executeAsyncQuery()
+              hide()
+            },
+          },
+          () => 'Filter',
+        ),
+      ]),
+    ])
 }
 
 function renderNumberFilter(columnKey) {
@@ -828,7 +930,6 @@ function startMrpStatusPolling() {
       currentStockLevels.value = {}
       executeAsyncQuery()
       last_mrp_run.reload()
-      refreshExpediteList()
     }
   }, 5000)
 }
@@ -852,7 +953,7 @@ const mrpRunCompleteHandler = () => {
   toast.success('MRP data refreshed')
   executeAsyncQuery()
   last_mrp_run.reload()
-  refreshExpediteList()
+  mrp_settings.reload()
   call('erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status').then(applyMrpStatus)
 }
 
@@ -869,7 +970,6 @@ onMounted(async () => {
   }
   if (!presetLoaded) executeAsyncQuery()
   checkForecastCoverage()
-  refreshExpediteList()
   call('erpnext_mrp.mrp.tasks.mrp_run.get_mrp_run_status').then(applyMrpStatus)
   window.frappe?.realtime?.on('mrp_run_started', mrpRunStartedHandler)
   window.frappe?.realtime?.on('mrp_run_complete', mrpRunCompleteHandler)
@@ -886,6 +986,55 @@ const mrp_settings = createDocumentResource({
   name: 'MRP Settings',
   auto: true,
 })
+
+// Stockouts are only flagged while suggestions are deferred within the lead time
+const stockoutsEnabled = computed(
+  () => Number(mrp_settings.doc?.defer_suggestions_within_lead_time) === 1,
+)
+
+const showInboundDialog = ref(false)
+const inboundTitle = ref('')
+const inboundStockout = ref('')
+const inboundLines = ref([])
+const inboundLoading = ref(false)
+const inboundError = ref('')
+
+async function openInboundDialog(row, weekKey = null) {
+  inboundTitle.value = weekKey
+    ? `Scheduled receipts: ${row.item_code}, ${weekKey}`
+    : `Open orders to expedite: ${row.item_code}`
+  inboundStockout.value =
+    !weekKey && row.has_stockout ? stockoutSummary(row) : ''
+  inboundLines.value = []
+  inboundError.value = ''
+  inboundLoading.value = true
+  showInboundDialog.value = true
+  try {
+    inboundLines.value = await call(
+      'erpnext_mrp.mrp.tasks.mrp_run.get_inbound_supply',
+      { item_code: row.item_code, week_key: weekKey },
+    )
+  } catch (e) {
+    inboundError.value = e.message
+  }
+  inboundLoading.value = false
+}
+
+function stockoutSummary(row) {
+  return `Runs out of stock from ${formatDate(
+    row.first_stockout_date,
+  )}, up to ${formatQuantity(
+    row.stockout_qty,
+  )} short, before an order placed today can arrive.`
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleDateString() : ''
+}
+
+function isOverdue(value) {
+  return value && new Date(value) < new Date(new Date().toDateString())
+}
 
 const defaultTimeUnit = computed(
   () => mrp_settings.doc?.default_time_unit || 'Days',
@@ -1112,6 +1261,52 @@ function getWeekKeys() {
   return weeks
 }
 
+function stockoutColumns() {
+  return [
+    {
+      title: 'Stockout From',
+      key: 'first_stockout_date',
+      filter: true,
+      filterOptionValue: appliedFlagFilters.has_stockout || null,
+      renderFilterMenu: renderFlagFilter(
+        'has_stockout',
+        'Only items with a stockout',
+      ),
+      width: 120,
+      align: 'right',
+      sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'first_stockout_date'
+          ? sorterRef.value.order
+          : false,
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        if (!row.has_stockout) return '—'
+        return h(
+          'span',
+          { class: 'text-red-600', title: stockoutSummary(row) },
+          formatDate(row.first_stockout_date),
+        )
+      },
+    },
+    {
+      title: 'Peak Shortage',
+      key: 'stockout_qty',
+      width: 110,
+      align: 'right',
+      sorter: 'default',
+      sortOrder:
+        sorterRef.value.columnKey === 'stockout_qty'
+          ? sorterRef.value.order
+          : false,
+      render: (row) => {
+        if (row.type !== 'HEADER') return ''
+        return row.has_stockout ? formatQuantity(row.stockout_qty) : '—'
+      },
+    },
+  ]
+}
+
 const columns = computed(() => {
   const staticCols = [
     {
@@ -1161,22 +1356,23 @@ const columns = computed(() => {
               ),
             )
           }
-          if (expediteEnabled.value && row.has_stockout) {
+          if (stockoutsEnabled.value && row.has_stockout) {
             badges.push(
               h(
                 'span',
                 {
-                  title: `Runs out of stock from ${new Date(
-                    row.first_stockout_date,
-                  ).toLocaleDateString()}, up to ${
-                    row.stockout_qty
-                  } short, before an order placed today can arrive. Click to open the Expedite List.`,
+                  title: `${stockoutSummary(
+                    row,
+                  )} Click to see the open orders to expedite.`,
                   style: {
                     color: '#c0392b',
                     cursor: 'pointer',
                     fontSize: '13px',
                   },
-                  onClick: () => router.push('/expedite'),
+                  onClick: (e) => {
+                    e.stopPropagation()
+                    openInboundDialog(row)
+                  },
                 },
                 '⏰',
               ),
@@ -1433,6 +1629,7 @@ const columns = computed(() => {
           : '—'
       },
     },
+    ...(stockoutsEnabled.value ? stockoutColumns() : []),
   ]
 
   const weekCols = getWeekKeys().map((weekKey) => {
@@ -1482,6 +1679,26 @@ const columns = computed(() => {
           formattedVal = ''
         } else if (qField && qField.formatter) {
           formattedVal = qField.formatter(val)
+        }
+
+        if (
+          row.type === 'DETAIL' &&
+          row.measure_key === 'scheduled_receipts' &&
+          val > 0
+        ) {
+          return h(
+            'span',
+            {
+              style: {
+                cursor: 'pointer',
+                textDecoration: 'underline dotted',
+                textUnderlineOffset: '3px',
+              },
+              title: 'Click to see the orders',
+              onClick: () => openInboundDialog(row, weekKey),
+            },
+            formattedVal,
+          )
         }
 
         if (
@@ -1634,6 +1851,10 @@ async function executeAsyncQuery() {
     ])
   }
 
+  if (stockoutsEnabled.value && appliedFlagFilters.has_stockout) {
+    backendFilters.push(['MRP Entry', 'has_stockout', '=', 1])
+  }
+
   try {
     const count = await call('frappe.client.get_count', {
       doctype: 'MRP Entry',
@@ -1662,6 +1883,10 @@ async function executeAsyncQuery() {
         ].includes(columnKey)
       ) {
         orderBy = `${columnKey} ${sortOrder}`
+      } else if (['first_stockout_date', 'stockout_qty'].includes(columnKey)) {
+        // Items without a stockout have no date and a zero peak: keep them below the
+        // stockouts in either direction
+        orderBy = `has_stockout desc, ${columnKey} ${sortOrder}`
       }
     }
 
@@ -1877,6 +2102,7 @@ const activePresetName = computed(() => {
     appliedTextFilters: { ...appliedTextFilters },
     appliedExcludeFilters: { ...appliedExcludeFilters },
     appliedNumberFilters: JSON.parse(JSON.stringify(appliedNumberFilters)),
+    appliedFlagFilters: { ...appliedFlagFilters },
     sorterRef: sorterRef.value,
     closed_column_field: closed_column_field.value,
   })
@@ -1886,6 +2112,8 @@ const activePresetName = computed(() => {
         appliedTextFilters: p.appliedTextFilters,
         appliedExcludeFilters: p.appliedExcludeFilters,
         appliedNumberFilters: p.appliedNumberFilters,
+        // Presets saved before flag filters existed have none set
+        appliedFlagFilters: { has_stockout: false, ...p.appliedFlagFilters },
         sorterRef: p.sorterRef,
         closed_column_field: p.closed_column_field,
       })
@@ -1941,6 +2169,7 @@ function confirmSavePreset() {
     appliedTextFilters: { ...appliedTextFilters },
     appliedExcludeFilters: { ...appliedExcludeFilters },
     appliedNumberFilters: JSON.parse(JSON.stringify(appliedNumberFilters)),
+    appliedFlagFilters: { ...appliedFlagFilters },
     sorterRef: { ...sorterRef.value },
     closed_column_field: closed_column_field.value,
   })
@@ -1961,6 +2190,12 @@ function applyPreset(preset) {
       numberFilters[k].max = preset.appliedNumberFilters[k].max
     }
   })
+  const presetFlagFilters = {
+    has_stockout: false,
+    ...preset.appliedFlagFilters,
+  }
+  Object.assign(appliedFlagFilters, presetFlagFilters)
+  Object.assign(flagFilters, presetFlagFilters)
   sorterRef.value = { ...preset.sorterRef }
   closed_column_field.value = preset.closed_column_field
   paginationReactive.page = 1
@@ -1992,6 +2227,10 @@ function clearFilters() {
     numberFilters[k].max = null
     appliedNumberFilters[k].min = null
     appliedNumberFilters[k].max = null
+  })
+  Object.keys(flagFilters).forEach((k) => {
+    flagFilters[k] = false
+    appliedFlagFilters[k] = false
   })
   paginationReactive.page = 1
   executeAsyncQuery()
